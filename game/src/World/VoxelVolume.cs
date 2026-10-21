@@ -6,8 +6,9 @@ namespace Cataclysm3D.Game.World;
 /// Voxel grid over one z-level of a tile map, stored in square columns of
 /// <see cref="ChunkTiles"/> × <see cref="ChunkTiles"/> tiles that are only allocated once
 /// something is drawn in them (open air and buried soil cost nothing). Each voxel is a packed
-/// RGBA8 color; 0 is empty and alpha below 255 marks translucent voxels (glass). x/z follow
-/// tile x/y, y is up.
+/// RGBA8 color; 0 is empty and alpha below 255 marks translucent voxels (glass). A voxel can also
+/// carry a <see cref="SurfaceAtlas"/> slot, whose sprite is then drawn across its faces (tinted by
+/// the color). x/z follow tile x/y, y is up.
 /// </summary>
 public sealed class VoxelVolume
 {
@@ -28,6 +29,7 @@ public sealed class VoxelVolume
     private const int ChunkVoxels = ChunkTiles * PerTile;
 
     private readonly uint[]?[] _chunks;
+    private readonly ushort[]?[] _slots;
     private readonly int _chunksX;
 
     public int SizeX { get; }
@@ -39,6 +41,7 @@ public sealed class VoxelVolume
         SizeZ = tilesZ * PerTile;
         _chunksX = (SizeX + ChunkVoxels - 1) / ChunkVoxels;
         _chunks = new uint[]?[_chunksX * ((SizeZ + ChunkVoxels - 1) / ChunkVoxels)];
+        _slots = new ushort[]?[_chunks.Length];
     }
 
     public bool InBounds(int x, int y, int z) =>
@@ -55,18 +58,54 @@ public sealed class VoxelVolume
         return chunk is null ? 0 : chunk[Index(x, y, z)];
     }
 
-    public void Set(int x, int y, int z, uint rgba)
+    /// <summary>The atlas slot drawn on a voxel's faces, or 0 for plain color.</summary>
+    public int Slot(int x, int y, int z)
+    {
+        if (!InBounds(x, y, z))
+            return 0;
+        var slots = _slots[z / ChunkVoxels * _chunksX + x / ChunkVoxels];
+        return slots is null ? 0 : slots[Index(x, y, z)];
+    }
+
+    /// <summary>
+    /// Copies the whole column at (x, z), all <see cref="Height"/> voxels bottom up, into the
+    /// spans; out-of-bounds or unallocated columns read as empty.
+    /// </summary>
+    public void ReadColumn(int x, int z, Span<uint> colors, Span<int> slots)
+    {
+        if (x < 0 || z < 0 || x >= SizeX || z >= SizeZ || _chunks[z / ChunkVoxels * _chunksX + x / ChunkVoxels] is not { } chunk)
+        {
+            colors[..Height].Clear();
+            slots[..Height].Clear();
+            return;
+        }
+        int i = Index(x, 0, z);
+        chunk.AsSpan(i, Height).CopyTo(colors);
+        var s = _slots[z / ChunkVoxels * _chunksX + x / ChunkVoxels];
+        for (int y = 0; y < Height; y++)
+            slots[y] = s is null ? 0 : s[i + y];
+    }
+
+    public void Set(int x, int y, int z, uint rgba, int slot = 0)
     {
         if (!InBounds(x, y, z))
             return;
-        ref var chunk = ref _chunks[z / ChunkVoxels * _chunksX + x / ChunkVoxels];
+        int c = z / ChunkVoxels * _chunksX + x / ChunkVoxels;
+        ref var chunk = ref _chunks[c];
         if (chunk is null)
         {
             if (rgba == 0)
                 return;
             chunk = new uint[ChunkVoxels * ChunkVoxels * Height];
         }
-        chunk[Index(x, y, z)] = rgba;
+        int i = Index(x, y, z);
+        chunk[i] = rgba;
+        ref var slots = ref _slots[c];
+        if (slot != 0 || slots is not null)
+        {
+            slots ??= new ushort[chunk.Length];
+            slots[i] = (ushort)(rgba == 0 ? 0 : slot);
+        }
     }
 
     private static int Index(int x, int y, int z) =>
@@ -77,9 +116,14 @@ public sealed class VoxelVolume
         var chunk = _chunks[tz / ChunkTiles * _chunksX + tx / ChunkTiles];
         if (chunk is null)
             return;
+        var slots = _slots[tz / ChunkTiles * _chunksX + tx / ChunkTiles];
         for (int x = tx * PerTile; x < (tx + 1) * PerTile; x++)
         for (int z = tz * PerTile; z < (tz + 1) * PerTile; z++)
+        {
             Array.Clear(chunk, Index(x, 0, z), Height);
+            if (slots is not null)
+                Array.Clear(slots, Index(x, 0, z), Height);
+        }
     }
 
     public static bool IsTranslucent(uint rgba) => rgba != 0 && (rgba & 0xFF) < 0xFF;

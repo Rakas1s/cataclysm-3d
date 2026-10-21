@@ -14,7 +14,7 @@ See [PLAN.md](PLAN.md) for the roadmap.
 | Path | What |
 |---|---|
 | `src/Sim` | Pure C# simulation core (no Godot types). Turns, map, creatures, rules. |
-| `src/Importer` | Loads CDDA JSON and resolves `copy-from` / `extend` / `delete` / `relative` / `proportional`. |
+| `src/Importer` | Loads CDDA JSON and resolves `copy-from` / `extend` / `delete` / `relative` / `proportional`. Also reads tilesets (`Tiles/`): packed `tile_config.json` and unpacked per-sprite layouts, with fallback across tilesets and `looks_like`. |
 | `game/` | Godot 4 .NET project: rendering, input, UI. References `Sim` and `Importer`. |
 | `tests/` | xUnit tests for `Sim` and `Importer`. |
 | `cdda-snapshot/` | Pinned CDDA data and tilesets, fetched by `tools/fetch-cdda-snapshot.ps1`. |
@@ -36,13 +36,30 @@ dotnet run --project tools/ImportCheck -c Release   # load + resolve all CDDA JS
 
 Then open `game/project.godot` in Godot .NET and press Play.
 
-![The M2 town](docs/screenshots/m2-street.png)
+![The town drawn from the UndeadPeople tileset](docs/screenshots/m3-street.png)
 
 The game starts on the street of a small town of six CDDA houses (M2). Each house is generated
 on every z-level its CDDA `city_building` lists: basement on z-1, ground floor, upper floors and
 the `_roof` mapgen on top. Walk in, take the stairs, or climb a downspout onto the roof.
 
 ![Stairs to the second floor](docs/screenshots/m2-stairs.png)
+
+### Tileset art (M3, first part)
+
+Terrain and furniture are drawn from the
+[UndeadPeople](https://github.com/Goodgulf-PL/UndeadPeopleTileset_Unpacked_New_Version) tileset,
+with Ultica filling the gaps (`config/tilesets.json`; see [CREDITS.md](CREDITS.md)):
+
+- Floors, roofs and ground show their sprite as their top surface, with CDDA's multitile pieces
+  (carpet borders, grass edges). Walls repeat their sprite every meter.
+- Furniture sprites are extruded into voxel models, one voxel per pixel: fridges and cupboards
+  from their front, tables and beds from their top (with legs), chairs, toilets and lamps as
+  standing silhouettes. Models are built once per sprite and cached.
+- Ids with no sprite in either tileset keep the old placeholder shapes. Doors, windows and
+  stairs keep their M1/M2 geometry; doors are painted from their sprite.
+
+![A kitchen](docs/screenshots/m3-kitchen.png)
+![A bedroom](docs/screenshots/m3-bedroom.png)
 
 ### Controls (M2)
 
@@ -71,6 +88,11 @@ godot --path game -- --shot=out.png,3,8,-90,-25,1,0    # ...then z-level and hou
 
 House-local coordinates are the mapgen rows as drawn in the JSON, even for houses turned to face
 the road; yaw is in the world (0 = north). Lots 0–2 are south of the road, 3–5 north of it.
+
+```powershell
+godot --path game -- --shot=out.png,@f_fridge,3,0,-12  # stand 3 tiles south of the first fridge in town
+godot --headless --path game -- --art-report            # which sprite each id in the town is drawn from
+```
 
 Mapgen debugging: `dotnet run --project tools/ImportCheck -c Release -- --print bungalow01_1 3`
 prints a generated house as ASCII, and `-- --town 1` prints every z-level of the game's town.

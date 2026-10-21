@@ -44,7 +44,8 @@ public partial class Main : Node3D
         _content = new Content();
 
         SetUpEnvironment();
-        _view = new WorldView();
+        _view = new WorldView { Art = _content.Art };
+        TileVoxelizer.Registry = _content.Registry;
         AddChild(_view);
 
         _body = new Node3D();
@@ -79,18 +80,53 @@ public partial class Main : Node3D
     {
         foreach (var arg in OS.GetCmdlineUserArgs())
         {
+            if (arg == "--art-report")
+            {
+                ArtReport();
+                if (!OS.GetCmdlineUserArgs().Any(a => a.StartsWith("--shot=", StringComparison.Ordinal)))
+                    GetTree().Quit();
+                continue;
+            }
             if (!arg.StartsWith("--shot=", StringComparison.Ordinal))
                 continue;
             var p = arg["--shot=".Length..].Split(',');
-            int z = p.Length > 5 ? int.Parse(p[5]) : 0;
-            var lot = _town.Lots[p.Length > 6 ? int.Parse(p[6]) : 0];
-            var (x, y) = lot.ToTown(int.Parse(p[1]), int.Parse(p[2]));
-            _shots.Enqueue((p[0], new TilePos(x, y, z),
+            TilePos pos;
+            if (p[1].StartsWith('@'))
+            {
+                // --shot=out.png,@f_bed,dy,yaw,pitch: stand dy tiles south of the first f_bed in town.
+                if (FindFurniture(p[1][1..]) is not { } at)
+                {
+                    GD.PushWarning($"No {p[1][1..]} in this town");
+                    continue;
+                }
+                pos = at with { Y = at.Y + int.Parse(p[2]) };
+            }
+            else
+            {
+                int z = p.Length > 5 ? int.Parse(p[5]) : 0;
+                var lot = _town.Lots[p.Length > 6 ? int.Parse(p[6]) : 0];
+                var (x, y) = lot.ToTown(int.Parse(p[1]), int.Parse(p[2]));
+                pos = new TilePos(x, y, z);
+            }
+            _shots.Enqueue((p[0], pos,
                 Mathf.DegToRad(float.Parse(p[3], System.Globalization.CultureInfo.InvariantCulture)),
                 Mathf.DegToRad(float.Parse(p[4], System.Globalization.CultureInfo.InvariantCulture))));
         }
         if (_shots.Count > 0)
             Input.MouseMode = Input.MouseModeEnum.Visible;
+    }
+
+    private TilePos? FindFurniture(string id)
+    {
+        for (int z = _world.MinZ; z <= _world.MaxZ; z++)
+        {
+            var level = _world.Level(z);
+            for (int y = 0; y < level.Height; y++)
+            for (int x = 0; x < level.Width; x++)
+                if (level.FurnitureAt(x, y)?.Id == id)
+                    return new TilePos(x, y, z);
+        }
+        return null;
     }
 
     private bool RunShots()
@@ -120,6 +156,43 @@ public partial class Main : Node3D
         return true;
     }
 
+    /// <summary>
+    /// Prints which sprite every terrain and furniture id in the town is drawn from
+    /// (<c>godot --path game -- --art-report</c>), so missing art is easy to spot.
+    /// </summary>
+    private void ArtReport()
+    {
+        var types = new SortedDictionary<string, (TileType Type, int Count)>(StringComparer.Ordinal);
+        for (int z = _world.MinZ; z <= _world.MaxZ; z++)
+        {
+            var level = _world.Level(z);
+            for (int y = 0; y < level.Height; y++)
+            for (int x = 0; x < level.Width; x++)
+            {
+                foreach (TileType? t in new TileType?[] { level.TerrainAt(x, y), level.FurnitureAt(x, y) })
+                    if (t is not null)
+                        types[t.Id] = (t, types.GetValueOrDefault(t.Id).Count + 1);
+            }
+        }
+        // Where each id first appears, in --shot coordinates (house-local x, y, z, lot).
+        var where = new Dictionary<string, string>(StringComparer.Ordinal);
+        for (int li = 0; li < _town.Lots.Count; li++)
+        for (int z = _world.MinZ; z <= _world.MaxZ; z++)
+        for (int ly = 0; ly < _town.Lots[li].Height; ly++)
+        for (int lx = 0; lx < _town.Lots[li].Width; lx++)
+        {
+            var (x, y) = _town.Lots[li].ToTown(lx, ly);
+            if (_world.Level(z).FurnitureAt(x, y) is { } f)
+                where.TryAdd(f.Id, $"{lx},{ly},{z},{li}");
+        }
+        foreach (var (id, (type, count)) in types)
+        {
+            var hit = _content.Art?.Resolve(type);
+            string from = hit is null ? "NO ART (placeholder)" : $"{hit.Tileset.Name.Split(' ')[0]}:{hit.MatchedId}{(hit.Entry.Multitile ? " [multitile]" : "")}";
+            GD.Print($"{id,-36} x{count,-5} {from,-48} {where.GetValueOrDefault(id, "")}");
+        }
+    }
+
     private void LoadTown()
     {
         var clock = System.Diagnostics.Stopwatch.StartNew();
@@ -129,7 +202,10 @@ public partial class Main : Node3D
         _view.Display(_world);
         _sim = new TurnScheduler(new PlayerActor());
         _message = $"Generated a town of {_town.Lots.Count} houses (seed {_seed}) in {clock.ElapsedMilliseconds} ms. " +
-                   $"CDDA data loaded in {_content.LoadMilliseconds} ms.";
+                   $"CDDA data loaded in {_content.LoadMilliseconds} ms. " +
+                   (_content.Art is { } art
+                       ? $"Tilesets {art.Summary} loaded in {art.LoadMilliseconds} ms; {art.Atlas.Count} surface sprites, {art.Models.Count} furniture models."
+                       : "No tileset fetched: placeholder shapes.");
         GoToLot(_lotIndex);
     }
 

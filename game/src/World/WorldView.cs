@@ -6,8 +6,9 @@ namespace Cataclysm3D.Game.World;
 /// <summary>
 /// Renders a <see cref="WorldMap"/> as voxels: one layer per z-level, stacked
 /// <see cref="LevelHeight"/> apart, each meshed in square chunks of
-/// <see cref="VoxelVolume.ChunkTiles"/> tiles. Chunks touched by tile changes (doors opening,
-/// etc.) are re-meshed on the next frame.
+/// <see cref="VoxelVolume.ChunkTiles"/> tiles. Each chunk holds its terrain mesh plus the
+/// sprite-extruded furniture models standing in it. Chunks touched by tile changes (doors
+/// opening, etc.) are rebuilt on the next frame.
 /// </summary>
 public partial class WorldView : Node3D
 {
@@ -19,7 +20,7 @@ public partial class WorldView : Node3D
 
     private const int ChunkTiles = VoxelVolume.ChunkTiles;
 
-    private readonly Dictionary<Vector3I, MeshInstance3D> _chunks = new();
+    private readonly Dictionary<Vector3I, Node3D> _chunks = new();
     private readonly HashSet<Vector3I> _dirty = new();
     private readonly Dictionary<int, Node3D> _levelNodes = new();
     private readonly Dictionary<int, VoxelVolume> _volumes = new();
@@ -31,6 +32,7 @@ public partial class WorldView : Node3D
         VertexColorUseAsAlbedo = true,
         VertexColorIsSrgb = true,
         Roughness = 0.95f,
+        TextureFilter = BaseMaterial3D.TextureFilterEnum.Nearest,
     };
 
     private readonly StandardMaterial3D _glass = new()
@@ -44,6 +46,17 @@ public partial class WorldView : Node3D
     };
 
     public static float LevelBase(int z) => z * LevelHeight;
+
+    /// <summary>Tileset art drawn on the voxels; set before <see cref="Display"/>. Null draws placeholders.</summary>
+    public TileArt? Art
+    {
+        get => TileVoxelizer.Art;
+        set
+        {
+            TileVoxelizer.Art = value;
+            _opaque.AlbedoTexture = value?.Atlas.Texture;
+        }
+    }
 
     public void Display(WorldMap map)
     {
@@ -127,6 +140,7 @@ public partial class WorldView : Node3D
 
     private void RebuildDirty()
     {
+        TileVoxelizer.Art?.Atlas.Flush();
         foreach (var c in _dirty)
         {
             var volume = _volumes[c.Z];
@@ -136,17 +150,45 @@ public partial class WorldView : Node3D
                 VoxelVolume.Height,
                 Math.Min(min.Z + ChunkTiles * VoxelVolume.PerTile, volume.SizeZ));
             var mesh = VoxelMesher.Build(volume, min, max, _opaque, _glass);
+            var furniture = Furniture(c);
 
-            if (!_chunks.TryGetValue(c, out var instance))
+            if (!_chunks.TryGetValue(c, out var node))
             {
-                if (mesh is null)
+                if (mesh is null && furniture.Count == 0)
                     continue;
-                instance = new MeshInstance3D { Visible = IsChunkVisible(c) };
-                _levelNodes[c.Z].AddChild(instance);
-                _chunks[c] = instance;
+                node = new Node3D { Visible = IsChunkVisible(c) };
+                node.AddChild(new MeshInstance3D { Name = "Terrain" });
+                _levelNodes[c.Z].AddChild(node);
+                _chunks[c] = node;
             }
-            instance.Mesh = mesh;
+            ((MeshInstance3D)node.GetChild(0)).Mesh = mesh;
+            for (int i = node.GetChildCount() - 1; i >= 1; i--)
+                node.GetChild(i).QueueFree();
+            foreach (var f in furniture)
+                node.AddChild(f);
         }
         _dirty.Clear();
+    }
+
+    /// <summary>Instances of the furniture models standing in a chunk.</summary>
+    private List<MeshInstance3D> Furniture(Vector3I chunk)
+    {
+        var list = new List<MeshInstance3D>();
+        var level = _map!.Level(chunk.Z);
+        for (int y = chunk.Y * ChunkTiles; y < Math.Min((chunk.Y + 1) * ChunkTiles, level.Height); y++)
+        for (int x = chunk.X * ChunkTiles; x < Math.Min((chunk.X + 1) * ChunkTiles, level.Width); x++)
+        {
+            if (TileVoxelizer.FurnitureModel(_map, x, y, chunk.Z) is not { } model)
+                continue;
+            // Models are built from the tile's north-west corner; turn them about the tile's center.
+            var center = new Vector3(x + 0.5f, VoxelVolume.VoxelSize, y + 0.5f);
+            var basis = new Basis(Vector3.Up, model.Yaw);
+            list.Add(new MeshInstance3D
+            {
+                Mesh = model.Mesh,
+                Transform = new Transform3D(basis, center - basis * new Vector3(0.5f, 0, 0.5f)),
+            });
+        }
+        return list;
     }
 }
