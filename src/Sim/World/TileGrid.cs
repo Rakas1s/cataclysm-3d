@@ -81,21 +81,41 @@ public sealed class TileGrid
     /// </summary>
     public bool TryOpen(int x, int y, bool fromInside = false)
     {
-        if (!InBounds(x, y))
-            return false;
-        if (FurnitureAt(x, y) is { Open: { } fOpen } && Registry.TryFurniture(fOpen, out _))
+        switch (OpenTarget(x, y, fromInside))
         {
-            SetFurniture(x, y, fOpen);
-            return true;
+            case (true, var id):
+                SetFurniture(x, y, id);
+                return true;
+            case (false, var id):
+                SetTerrain(x, y, id);
+                return true;
+            default:
+                return false;
         }
+    }
+
+    /// <summary>Whether <see cref="TryOpen"/> would open something, without opening it.</summary>
+    public bool CanOpen(int x, int y, bool fromInside = false) => OpenTarget(x, y, fromInside) is not null;
+
+    /// <summary>
+    /// Whether a door here only opens from the inside (CDDA's LOCKED / OPENCLOSE_INSIDE), so
+    /// bumping it from outside does nothing.
+    /// </summary>
+    public bool OpensOnlyFromInside(int x, int y) =>
+        InBounds(x, y) && TerrainAt(x, y) is { Open: not null } t && !t.Has("WINDOW")
+        && (t.Has("LOCKED") || t.Has("OPENCLOSE_INSIDE"));
+
+    private (bool Furniture, string Id)? OpenTarget(int x, int y, bool fromInside)
+    {
+        if (!InBounds(x, y))
+            return null;
+        if (FurnitureAt(x, y) is { Open: { } fOpen } && Registry.TryFurniture(fOpen, out _))
+            return (true, fOpen);
         var t = TerrainAt(x, y);
         if (t.Open is not { } tOpen || t.Has("WINDOW") || !Registry.TryTerrain(tOpen, out _))
-            return false;
+            return null;
         bool canOpen = t.Has("LOCKED") || t.Has("OPENCLOSE_INSIDE") ? fromInside : t.Has("DOOR");
-        if (!canOpen)
-            return false;
-        SetTerrain(x, y, tOpen);
-        return true;
+        return canOpen ? (false, tOpen) : null;
     }
 
     /// <summary>Whether a tile counts as indoors for OPENCLOSE_INSIDE doors: it has a roof.</summary>
@@ -107,6 +127,20 @@ public sealed class TileGrid
     /// Smashes furniture first, then terrain, using CDDA's bash data. Returns the outcome and the
     /// sound it makes ("glass breaking!", "whump!", …).
     /// </summary>
+    /// <summary>
+    /// What <see cref="TryBash"/> would hit here (furniture first, then terrain) and its bash
+    /// data, or null if there's nothing to smash.
+    /// </summary>
+    public (string Name, BashInfo Bash)? BashTarget(int x, int y)
+    {
+        if (!InBounds(x, y))
+            return null;
+        if (FurnitureAt(x, y) is { Bash: { } fb } f)
+            return (f.Name, fb);
+        var t = TerrainAt(x, y);
+        return t.Bash is { TerrainSet: { } terSet } tb && Registry.TryTerrain(terSet, out _) ? (t.Name, tb) : null;
+    }
+
     public (BashOutcome Outcome, string Sound, string Name) TryBash(int x, int y, int strength, Random rng)
     {
         if (!InBounds(x, y))
@@ -134,20 +168,32 @@ public sealed class TileGrid
     /// <summary>Closes an open door (terrain or furniture). Returns true if something closed.</summary>
     public bool TryClose(int x, int y)
     {
-        if (!InBounds(x, y))
-            return false;
-        if (FurnitureAt(x, y) is { Close: { } fClose } && Registry.TryFurniture(fClose, out _))
+        switch (CloseTarget(x, y))
         {
-            SetFurniture(x, y, fClose);
-            return true;
+            case (true, var id):
+                SetFurniture(x, y, id);
+                return true;
+            case (false, var id):
+                SetTerrain(x, y, id);
+                return true;
+            default:
+                return false;
         }
+    }
+
+    /// <summary>Whether <see cref="TryClose"/> would close something, without closing it.</summary>
+    public bool CanClose(int x, int y) => CloseTarget(x, y) is not null;
+
+    private (bool Furniture, string Id)? CloseTarget(int x, int y)
+    {
+        if (!InBounds(x, y))
+            return null;
+        if (FurnitureAt(x, y) is { Close: { } fClose } && Registry.TryFurniture(fClose, out _))
+            return (true, fClose);
         if (TerrainAt(x, y).Close is { } tClose && Registry.TryTerrain(tClose, out int i)
             && Registry.Terrain[i].Has("DOOR"))
-        {
-            SetTerrain(x, y, tClose);
-            return true;
-        }
-        return false;
+            return (false, tClose);
+        return null;
     }
 
     /// <summary>

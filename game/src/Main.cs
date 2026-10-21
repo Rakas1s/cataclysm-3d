@@ -1,3 +1,4 @@
+using Cataclysm3D.Game.UI;
 using Cataclysm3D.Game.World;
 using Cataclysm3D.Importer.World;
 using Cataclysm3D.Sim;
@@ -29,6 +30,8 @@ public partial class Main : Node3D
     private Node3D _body = null!;
     private Camera3D _camera = null!;
     private Label _hud = null!;
+    private readonly InteractionTooltip _tooltip = new();
+    private string _tooltipState = "";
 
     private int _lotIndex;
     private int _seed = 1;
@@ -62,6 +65,7 @@ public partial class Main : Node3D
         var canvas = new CanvasLayer();
         canvas.AddChild(_hud);
         canvas.AddChild(Crosshair());
+        canvas.AddChild(_tooltip);
         AddChild(canvas);
 
         LoadTown();
@@ -93,7 +97,7 @@ public partial class Main : Node3D
             TilePos pos;
             if (p[1].StartsWith('@'))
             {
-                // --shot=out.png,@f_bed,dy,yaw,pitch: stand dy tiles south of the first f_bed in town.
+                // --shot=out.png,@f_bed,dy,yaw,pitch: stand dy tiles south of the first f_bed (or terrain id) in town.
                 if (FindFurniture(p[1][1..]) is not { } at)
                 {
                     GD.PushWarning($"No {p[1][1..]} in this town");
@@ -123,7 +127,7 @@ public partial class Main : Node3D
             var level = _world.Level(z);
             for (int y = 0; y < level.Height; y++)
             for (int x = 0; x < level.Width; x++)
-                if (level.FurnitureAt(x, y)?.Id == id)
+                if (level.FurnitureAt(x, y)?.Id == id || level.TerrainAt(x, y).Id == id)
                     return new TilePos(x, y, z);
         }
         return null;
@@ -494,7 +498,34 @@ public partial class Main : Node3D
             (_warnings.Count > 0 ? $"Mapgen gaps: {_warnings.Count}\n" : "") +
             $"{_message}\n\n" +
             "WASD step · mouse look · walk into doors to open · C close · F smash · < > stairs, climb · N/B next/prev house · R reroll town · Esc mouse";
+        UpdateTooltip(facing);
     }
+
+    /// <summary>Lists the top three things you can do to the tile you face, with their keys.</summary>
+    private void UpdateTooltip(Vector2I facing)
+    {
+        var map = Level;
+        var actions = map.InBounds(facing.X, facing.Y)
+            ? Interactions.For(_world, _pos, (facing.X, facing.Y), UnarmedBashStrength)
+            : Array.Empty<Interaction>();
+        string title = actions.Count == 0 ? "" : map.FurnitureAt(facing.X, facing.Y)?.Name ?? map.TerrainAt(facing.X, facing.Y).Name;
+        // Mouse-look calls this every frame; only rebuild the panel when its content changes.
+        string state = title + string.Concat(actions.Select(a => "|" + a.Text));
+        if (state == _tooltipState)
+            return;
+        _tooltipState = state;
+        _tooltip.Show(Capitalize(title), actions.Select(a => (KeyFor(a.Kind), a.Text)).ToList());
+    }
+
+    private static string KeyFor(InteractionKind kind) => kind switch
+    {
+        InteractionKind.Open or InteractionKind.WalkOnto => "W", // you face it, so stepping forward bumps into it
+        InteractionKind.Close => "C",
+        InteractionKind.Smash => "F",
+        InteractionKind.ClimbUp => "<",
+        InteractionKind.ClimbDown => ">",
+        _ => "?",
+    };
 
     private static Control Crosshair()
     {

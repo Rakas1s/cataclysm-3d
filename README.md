@@ -76,6 +76,10 @@ with Ultica filling the gaps (`config/tilesets.json`; see [CREDITS.md](CREDITS.m
 | R | Re-roll the whole town with a new seed (wall paint, flooring, variants) |
 | Esc | Release / capture the mouse |
 
+Face something you can use (a door, window, chair, stairs, a downspout) and a tooltip by the
+crosshair lists the top three things you can do to it, with their keys: open, close, walk
+through, climb, smash (with how hard that'll be).
+
 While you're indoors, the levels above you are hidden nearby (each room keeps its ceiling), except
 when you're near stairs going up.
 
