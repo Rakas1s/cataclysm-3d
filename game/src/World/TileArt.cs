@@ -94,7 +94,8 @@ public sealed class TileArt
     }
 
     /// <summary>Loads the tilesets listed in <c>config/tilesets.json</c>; null if none are fetched.</summary>
-    public static TileArt? Load(string repoRoot, TileRegistry registry)
+    /// <param name="moreLooksLike">CDDA's <c>looks_like</c> for ids that aren't tiles (monsters).</param>
+    public static TileArt? Load(string repoRoot, TileRegistry registry, Func<string, string?>? moreLooksLike = null)
     {
         var clock = Stopwatch.StartNew();
         var sets = new List<Tileset>();
@@ -117,7 +118,7 @@ public sealed class TileArt
         string? LooksLike(string id) =>
             registry.TryTerrain(id, out int t) ? registry.Terrain[t].LooksLike
             : registry.TryFurniture(id, out int f) ? registry.Furniture[f].LooksLike
-            : null;
+            : moreLooksLike?.Invoke(id);
         return new TileArt(new SpriteResolver(sets, LooksLike), clock.ElapsedMilliseconds);
     }
 
@@ -131,6 +132,18 @@ public sealed class TileArt
             return null;
         var c = SpriteResolver.Choose(hit, x, y, connections, rotation);
         return c.Fg < 0 && c.Bg < 0 ? null : c;
+    }
+
+    /// <summary>
+    /// The sprite for any id with art (monsters, corpses), trying <paramref name="ids"/> in order.
+    /// <paramref name="variant"/> picks among random variants, so each monster keeps its look.
+    /// </summary>
+    public SpriteChoice? ChooseAny(int variant, params string[] ids)
+    {
+        foreach (var id in ids)
+            if (_resolver.Resolve(id, Season) is { } hit && SpriteResolver.Choose(hit, variant, 0) is { Fg: >= 0 } c)
+                return c;
+        return null;
     }
 
     /// <summary>Mean color of a tile's main sprite, for shapes that aren't drawn from the sprite itself.</summary>

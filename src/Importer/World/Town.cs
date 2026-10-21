@@ -51,7 +51,11 @@ public sealed record Lot(CityBuilding Building, int X, int Y, int Width, int Hei
     }
 }
 
-public sealed record Town(WorldMap Map, IReadOnlyList<Lot> Lots, IReadOnlyList<string> Warnings);
+public sealed record Town(WorldMap Map, IReadOnlyList<Lot> Lots, IReadOnlyList<string> Warnings)
+{
+    /// <summary>Monsters the buildings' mapgen placed, in town coordinates (not yet spawned).</summary>
+    public IReadOnlyList<(MonsterSpawn Spawn, TilePos Pos)> Spawns { get; init; } = Array.Empty<(MonsterSpawn, TilePos)>();
+}
 
 /// <summary>
 /// Lays out a fixed town: an east-west road with sidewalks, one row of buildings south of it
@@ -104,6 +108,7 @@ public sealed class TownGenerator
 
         var warnings = new List<string>();
         var lots = new List<Lot>();
+        var spawns = new List<(MonsterSpawn, TilePos)>();
         for (int i = 0; i < placed.Count; i++)
         {
             var (building, x, y, turns) = placed[i];
@@ -121,12 +126,17 @@ public sealed class TownGenerator
                     continue;
                 }
                 map.Level(z).Stamp(result.Map, x, y, turns, LotSize, LotSize);
+                foreach (var spawn in result.Spawns)
+                {
+                    var (rx, ry) = TileGrid.Rotate(spawn.X, spawn.Y, LotSize, LotSize, turns);
+                    spawns.Add((spawn, new TilePos(x + rx, y + ry, z)));
+                }
                 warnings.AddRange(result.Warnings.Select(w => $"{omt}: {w}"));
             }
             lots.Add(new Lot(building, x, y, LotSize, LotSize, turns));
         }
         map.AddMissingRoofs();
-        return new Town(map, lots, warnings);
+        return new Town(map, lots, warnings) { Spawns = spawns };
     }
 
     private CityBuilding Building(string id) =>

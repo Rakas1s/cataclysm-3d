@@ -75,20 +75,38 @@ Tiles you've seen but can't see now are drawn from memory, dim and grey; tiles y
 seen are black. Carry a flashlight (L) to see in the dark. Terrain or furniture with CDDA's
 `light_emitted` lights its surroundings (the starting town doesn't have any).
 
-### Controls (M3)
+### Zombies (M4)
+
+The town has zombies now, from CDDA's own monster JSON: a few from `GROUP_ZOMBIE` out on the
+street, and whatever the houses' mapgen places (`place_monsters`). They're drawn as billboards of
+their tileset sprites. They stand around and wander until they see you, then come for you. By day
+they see you from 40 tiles; at night only from a few, unless your flashlight gives you away.
+They walk around walls and through open doors, smash windows to get in, and need help to break
+down a door. Next to you, they claw at you.
+
+Walk into a zombie to punch it. The HUD shows your hit points per body part and a message log;
+you die when your head or torso reaches 0, and Enter starts a new run. Waiting stops when a
+zombie comes into view or hurts you. See [docs/divergences.md](docs/divergences.md) for how the
+rules differ from CDDA.
+
+![Zombies closing in on the street](docs/screenshots/m4-zombies.png)
+![A zombie by moonlight](docs/screenshots/m4-night.png)
+
+### Controls (M4)
 
 | Key | Action |
 |---|---|
-| WASD | Step to one of the 8 neighboring tiles, relative to where you look |
+| WASD | Step to one of the 8 neighboring tiles, relative to where you look; walk into a monster to punch it |
 | Mouse | Look (free, costs no time) |
 | Walk into a door | Open it |
 | C | Close the door you're facing |
-| F | Smash what you're facing (windows break easily; locked doors take many kicks) |
+| F | Smash what you're facing (windows break easily; locked doors take many kicks), or punch the monster there |
 | Walk onto stairs | Take them up or down (ladders too) |
 | `<` / `>` (or `,` / `.`, PgUp / PgDn) | Go up / down the stairs or ladder you stand on, or climb a downspout or gutter drop next to you |
 | L | Turn your flashlight on or off |
 | 5 (or numpad 5) | Wait a turn (one second) |
-| `\` / `\|` | Wait 30 minutes / wait until the next sunrise or sunset |
+| `\` / `\|` | Wait 30 minutes / wait until the next sunrise or sunset (a zombie showing up stops it) |
+| Enter | After you die: start a new run |
 | N / B | Jump to the front of the next / previous house |
 | R | Re-roll the whole town with a new seed (wall paint, flooring, variants) |
 | Esc | Release / capture the mouse |
@@ -110,6 +128,11 @@ godot --path game -- --shot=out.png,3,8,-90,-25,1,0    # ...then z-level and hou
 Add `--time=HH:MM` (or `--time=day,HH:MM`, days from 0) to set the clock and `--flashlight` to
 have it on, e.g. `godot --path game -- --time=23:30 --flashlight --shot=night.png,@f_fridge,3,0,-12`.
 Shots in one run share what you've seen, so later shots show remembered tiles.
+
+Monsters: `--no-zombies` leaves the town empty, `--zombie=dx,dy[,id]` puts a monster (default
+`mon_zombie`) dx tiles east and dy south of the first shot, `--wait=N` waits N turns before each
+shot so they can close in, and `--fight` then punches whatever is next to you until one of you
+dies, e.g. `godot --path game -- --no-zombies --zombie=0,-4 --wait=6 --fight --shot=fight.png,12,-1,0,-20`.
 
 House-local coordinates are the mapgen rows as drawn in the JSON, even for houses turned to face
 the road; yaw is in the world (0 = north). Lots 0–2 are south of the road, 3–5 north of it.

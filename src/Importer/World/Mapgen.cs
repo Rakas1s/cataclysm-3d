@@ -42,11 +42,19 @@ public sealed class MapgenLibrary
         _byOmt.TryGetValue(omt, out var list) ? list : Array.Empty<JsonObject>();
 }
 
-public sealed record MapgenResult(TileGrid Map, IReadOnlyList<string> Warnings);
+/// <summary>A monster mapgen wants placed: a monster id or a monster group id, at a map tile.</summary>
+public sealed record MonsterSpawn(string Id, bool IsGroup, int X, int Y);
+
+public sealed record MapgenResult(TileGrid Map, IReadOnlyList<string> Warnings)
+{
+    /// <summary>Monsters rolled from <c>place_monsters</c> and <c>place_monster</c>, not yet resolved to types.</summary>
+    public IReadOnlyList<MonsterSpawn> Spawns { get; init; } = Array.Empty<MonsterSpawn>();
+}
 
 /// <summary>
 /// Runs CDDA JSON mapgen: <c>rows</c> + palettes (nested, parametrized) + <c>terrain</c> /
-/// <c>furniture</c> / <c>mapping</c> symbol tables + <c>fill_ter</c>. Items, monsters, nested
+/// <c>furniture</c> / <c>mapping</c> symbol tables + <c>fill_ter</c>, and rolls
+/// <c>place_monsters</c> / <c>place_monster</c> into <see cref="MonsterSpawn"/>s. Items, nested
 /// chunks and loot are not placed yet.
 /// </summary>
 public sealed class MapgenGenerator
@@ -128,7 +136,38 @@ public sealed class MapgenGenerator
 
         foreach (var s in unknownSymbols)
             ctx.Warnings.Add($"symbol '{s}' has no terrain or furniture");
-        return new MapgenResult(map, ctx.Warnings);
+        return new MapgenResult(map, ctx.Warnings) { Spawns = Spawns(obj, ctx) };
+    }
+
+    /// <summary>
+    /// Rolls the monster placements. <c>place_monsters</c> (a group) fires with a one-in-<c>chance</c>
+    /// and places one monster per <c>repeat</c>; CDDA's <c>density</c> pack sizing is ignored.
+    /// <c>place_monster</c> (a monster or group) fires per <c>repeat</c> with <c>chance</c> percent.
+    /// </summary>
+    private static List<MonsterSpawn> Spawns(JsonObject obj, Context ctx)
+    {
+        var spawns = new List<MonsterSpawn>();
+        foreach (var e in (obj["place_monsters"] as JsonArray ?? new JsonArray()).OfType<JsonObject>())
+        {
+            if (e["monster"]?.GetValue<string>() is not { } group)
+                continue;
+            if (ctx.Roll(e["chance"], 1) is var oneIn && oneIn > 1 && ctx.Next(oneIn) != 0)
+                continue;
+            for (int i = ctx.Roll(e["repeat"], 1); i > 0; i--)
+                spawns.Add(new MonsterSpawn(group, true, ctx.Roll(e["x"], 0), ctx.Roll(e["y"], 0)));
+        }
+        foreach (var e in (obj["place_monster"] as JsonArray ?? new JsonArray()).OfType<JsonObject>())
+        {
+            string? monster = e["monster"]?.GetValue<string>();
+            string? group = e["group"]?.GetValue<string>();
+            if ((monster ?? group) is not { } id)
+                continue;
+            int percent = ctx.Roll(e["chance"], 100);
+            for (int i = ctx.Roll(e["repeat"], 1); i > 0; i--)
+                if (ctx.Next(100) < percent)
+                    spawns.Add(new MonsterSpawn(id, monster is null, ctx.Roll(e["x"], 0), ctx.Roll(e["y"], 0)));
+        }
+        return spawns;
     }
 
     private void PlaceSymbol(TileGrid map, Context ctx, int x, int y, string symbol, ISet<string> unknown)
@@ -189,6 +228,18 @@ public sealed class MapgenGenerator
             _rng = rng;
             _db = db;
         }
+
+        public int Next(int max) => _rng.Next(max);
+
+        /// <summary>A mapgen number: an int, or [min, max] rolled inclusively.</summary>
+        public int Roll(JsonNode? node, int fallback) => node switch
+        {
+            JsonValue v when v.TryGetValue(out double d) => (int)d,
+            JsonArray { Count: >= 2 } a when a[0] is JsonValue lo && a[1] is JsonValue hi
+                && lo.TryGetValue(out double l) && hi.TryGetValue(out double h) => _rng.Next((int)l, (int)Math.Max(l, h) + 1),
+            JsonArray { Count: 1 } a => Roll(a[0], fallback),
+            _ => fallback,
+        };
 
         public void Warn(string message)
         {

@@ -24,6 +24,9 @@ public sealed class TurnScheduler
 
     public bool PlayerCanAct => Player.Moves > 0 && !Player.IsDead;
 
+    /// <summary>Raised at the start of every new turn, after moves are handed out.</summary>
+    public event Action? TurnStarted;
+
     public TurnScheduler(PlayerActor player, GameTime? startTime = null)
     {
         Player = player;
@@ -76,5 +79,6 @@ public sealed class TurnScheduler
         _actors.RemoveAll(a => a.IsDead && a != Player);
         foreach (var actor in _actors)
             actor.Moves += actor.Speed;
+        TurnStarted?.Invoke();
     }
 }
