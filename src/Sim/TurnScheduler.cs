@@ -14,13 +14,20 @@ public sealed class TurnScheduler
     /// <summary>Turns elapsed since the start of the game. One turn is one second.</summary>
     public long Turn { get; private set; }
 
+    /// <summary>The calendar time at turn 0.</summary>
+    public GameTime StartTime { get; }
+
+    /// <summary>The current time on the calendar.</summary>
+    public GameTime Now => StartTime.Plus(Turn);
+
     public IReadOnlyList<Actor> Actors => _actors;
 
     public bool PlayerCanAct => Player.Moves > 0 && !Player.IsDead;
 
-    public TurnScheduler(PlayerActor player)
+    public TurnScheduler(PlayerActor player, GameTime? startTime = null)
     {
         Player = player;
+        StartTime = startTime ?? GameTime.GameStart;
         _actors.Add(player);
         player.Moves = player.Speed;
     }

@@ -8,6 +8,7 @@ public sealed class TileGrid
 {
     private readonly int[] _terrain;
     private readonly int[] _furniture;
+    private readonly int _nullFurniture;
 
     public TileRegistry Registry { get; }
     public int Width { get; }
@@ -24,7 +25,8 @@ public sealed class TileGrid
         _terrain = new int[width * height];
         _furniture = new int[width * height];
         Array.Fill(_terrain, registry.TerrainIndex(fillTerrain));
-        Array.Fill(_furniture, registry.FurnitureIndex(TileRegistry.NullFurniture));
+        _nullFurniture = registry.FurnitureIndex(TileRegistry.NullFurniture);
+        Array.Fill(_furniture, _nullFurniture);
     }
 
     public bool InBounds(int x, int y) => x >= 0 && y >= 0 && x < Width && y < Height;
@@ -73,6 +75,27 @@ public sealed class TileGrid
     }
 
     public bool IsPassable(int x, int y) => MoveCost(x, y) > 0;
+
+    /// <summary>
+    /// Whether sight and light pass through a tile: its terrain and any furniture on it are
+    /// TRANSPARENT (windows and open doors are; walls, closed doors, drawn curtains, fridges and
+    /// bookcases aren't). Off the map counts as opaque.
+    /// </summary>
+    public bool IsTransparent(int x, int y)
+    {
+        if (!InBounds(x, y))
+            return false;
+        int i = y * Width + x;
+        return Registry.Terrain[_terrain[i]].IsTransparent
+               && (_furniture[i] == _nullFurniture || Registry.Furniture[_furniture[i]].IsTransparent);
+    }
+
+    /// <summary>Light the tile's terrain and furniture give off (CDDA's <c>light_emitted</c>).</summary>
+    public int LightEmitted(int x, int y)
+    {
+        int i = y * Width + x;
+        return Registry.Terrain[_terrain[i]].LightEmitted + Registry.Furniture[_furniture[i]].LightEmitted;
+    }
 
     /// <summary>
     /// Opens a closed door (terrain or furniture). Locked doors with CDDA's OPENCLOSE_INSIDE flag

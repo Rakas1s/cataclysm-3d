@@ -61,7 +61,21 @@ with Ultica filling the gaps (`config/tilesets.json`; see [CREDITS.md](CREDITS.m
 ![A kitchen](docs/screenshots/m3-kitchen.png)
 ![A bedroom](docs/screenshots/m3-bedroom.png)
 
-### Controls (M2)
+### Light and vision (M3)
+
+The sim keeps CDDA's clock (1 turn = 1 second) and starts at 8:00 on spring day 1. The sun
+crosses from east to west, warm and low at dawn and dusk; at night a dim moon lights the street,
+and rooms are dark unless something lights them. Daylight comes into houses through windows
+and doorways, so rooms are bright near windows and dark deep inside.
+
+What you see is the sim's call, CDDA-style: shadowcasting from where you stand, then only the
+tiles lit enough to make out (plus the tiles right next to you). Walls, closed doors, drawn
+curtains, fridges and bookcases block sight; windows, open doors and low furniture don't.
+Tiles you've seen but can't see now are drawn from memory, dim and grey; tiles you've never
+seen are black. Carry a flashlight (L) to see in the dark. Terrain or furniture with CDDA's
+`light_emitted` lights its surroundings (the starting town doesn't have any).
+
+### Controls (M3)
 
 | Key | Action |
 |---|---|
@@ -72,6 +86,9 @@ with Ultica filling the gaps (`config/tilesets.json`; see [CREDITS.md](CREDITS.m
 | F | Smash what you're facing (windows break easily; locked doors take many kicks) |
 | Walk onto stairs | Take them up or down (ladders too) |
 | `<` / `>` (or `,` / `.`, PgUp / PgDn) | Go up / down the stairs or ladder you stand on, or climb a downspout or gutter drop next to you |
+| L | Turn your flashlight on or off |
+| 5 (or numpad 5) | Wait a turn (one second) |
+| `\` / `\|` | Wait 30 minutes / wait until the next sunrise or sunset |
 | N / B | Jump to the front of the next / previous house |
 | R | Re-roll the whole town with a new seed (wall paint, flooring, variants) |
 | Esc | Release / capture the mouse |
@@ -89,6 +106,10 @@ Screenshot mode for checking visuals without playing:
 godot --path game -- --shot=out.png,12,28,0,4          # file, house-local tile x, y, yaw°, pitch°
 godot --path game -- --shot=out.png,3,8,-90,-25,1,0    # ...then z-level and house (lot) index
 ```
+
+Add `--time=HH:MM` (or `--time=day,HH:MM`, days from 0) to set the clock and `--flashlight` to
+have it on, e.g. `godot --path game -- --time=23:30 --flashlight --shot=night.png,@f_fridge,3,0,-12`.
+Shots in one run share what you've seen, so later shots show remembered tiles.
 
 House-local coordinates are the mapgen rows as drawn in the JSON, even for houses turned to face
 the road; yaw is in the world (0 = north). Lots 0–2 are south of the road, 3–5 north of it.

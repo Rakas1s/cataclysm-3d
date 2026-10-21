@@ -25,8 +25,15 @@ public abstract class TileType
     /// <summary>What happens when this is smashed, or null if it can't be.</summary>
     public BashInfo? Bash { get; init; }
 
+    /// <summary>CDDA's <c>light_emitted</c>: how bright a light this gives off, or 0.</summary>
+    public int LightEmitted { get; init; }
+
     public bool Has(string flag) => Flags.Contains(flag);
-    public bool IsTransparent => Has("TRANSPARENT");
+
+    private bool? _transparent;
+
+    /// <summary>Whether sight and light pass through (CDDA's TRANSPARENT flag). Cached: FOV asks a lot.</summary>
+    public bool IsTransparent => _transparent ??= Has("TRANSPARENT");
 }
 
 /// <summary>

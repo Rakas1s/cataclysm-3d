@@ -27,6 +27,7 @@ public static class TileTypeLoader
                 MoveCost = Int(data["move_cost"], 2),
                 Roof = FirstString(data["roof"]),
                 Bash = Bash(data),
+                LightEmitted = Int(data["light_emitted"]),
             });
         }
         foreach (var (id, data) in db.All("furniture"))
@@ -46,6 +47,7 @@ public static class TileTypeLoader
                 Close = FirstString(data["close"]),
                 MoveCostMod = Int(data["move_cost_mod"]),
                 Bash = Bash(data),
+                LightEmitted = Int(data["light_emitted"]),
             });
         }
         return registry;

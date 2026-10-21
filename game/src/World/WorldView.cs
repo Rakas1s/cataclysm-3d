@@ -1,3 +1,4 @@
+using Cataclysm3D.Sim.Vision;
 using Cataclysm3D.Sim.World;
 using Godot;
 
@@ -27,23 +28,9 @@ public partial class WorldView : Node3D
     private WorldMap? _map;
     private (int Z, Vector2I Chunk, bool Indoors)? _cutaway;
 
-    private readonly StandardMaterial3D _opaque = new()
-    {
-        VertexColorUseAsAlbedo = true,
-        VertexColorIsSrgb = true,
-        Roughness = 0.95f,
-        TextureFilter = BaseMaterial3D.TextureFilterEnum.Nearest,
-    };
-
-    private readonly StandardMaterial3D _glass = new()
-    {
-        VertexColorUseAsAlbedo = true,
-        VertexColorIsSrgb = true,
-        Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
-        Roughness = 0.1f,
-        Metallic = 0.2f,
-        CullMode = BaseMaterial3D.CullModeEnum.Disabled,
-    };
+    private readonly ShaderMaterial _opaque = FogOfWar.CreateMaterial(0.95f);
+    private readonly ShaderMaterial _glass = FogOfWar.CreateMaterial(0.1f, glass: true);
+    private readonly FogOfWar _fog = new();
 
     public static float LevelBase(int z) => z * LevelHeight;
 
@@ -54,7 +41,7 @@ public partial class WorldView : Node3D
         set
         {
             TileVoxelizer.Art = value;
-            _opaque.AlbedoTexture = value?.Atlas.Texture;
+            _opaque.SetShaderParameter("albedo_tex", value?.Atlas.Texture);
         }
     }
 
@@ -130,6 +117,13 @@ public partial class WorldView : Node3D
         if (_cutaway is not { } c || !c.Indoors || key.Z <= c.Z)
             return true;
         return Math.Max(Math.Abs(key.X - c.Chunk.X), Math.Abs(key.Y - c.Chunk.Y)) > CutawayRadius;
+    }
+
+    /// <summary>Shows what the player sees, remembers and hasn't seen; cheap when nothing changed.</summary>
+    public void UpdateFog(FieldOfView fov)
+    {
+        if (_map is not null)
+            _fog.Update(_map, fov);
     }
 
     public override void _Process(double delta)

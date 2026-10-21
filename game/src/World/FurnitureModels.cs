@@ -34,12 +34,7 @@ public sealed class FurnitureModels
     private readonly TileArt _art;
     private readonly Dictionary<(Tileset, int, int, Shape), ArrayMesh?> _cache = new();
 
-    private readonly StandardMaterial3D _material = new()
-    {
-        VertexColorUseAsAlbedo = true,
-        VertexColorIsSrgb = true,
-        Roughness = 0.9f,
-    };
+    private readonly ShaderMaterial _material = FogOfWar.CreateMaterial(0.9f);
 
     public FurnitureModels(TileArt art) => _art = art;
 

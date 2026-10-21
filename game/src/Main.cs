@@ -2,15 +2,17 @@ using Cataclysm3D.Game.UI;
 using Cataclysm3D.Game.World;
 using Cataclysm3D.Importer.World;
 using Cataclysm3D.Sim;
+using Cataclysm3D.Sim.Vision;
 using Cataclysm3D.Sim.World;
 using Godot;
 
 namespace Cataclysm3D.Game;
 
 /// <summary>
-/// M2: generates a small town of real CDDA houses with every z-level of each (basements, upper
+/// Generates a small town of real CDDA houses with every z-level of each (basements, upper
 /// floors, roofs), renders it as stacked voxel levels and lets you walk it in first person with
-/// 8-direction tile steps, stairs and free mouse-look, driven by the sim's turns.
+/// 8-direction tile steps, stairs and free mouse-look, driven by the sim's turns. The sim's clock
+/// drives the sun and moon, and its field of view decides what you see (M3).
 /// </summary>
 public partial class Main : Node3D
 {
@@ -22,8 +24,18 @@ public partial class Main : Node3D
     /// <summary>How far up a flight of stairs you stand on its bottom tile, so you aren't inside the steps.</summary>
     private const float StairsLift = 0.6f;
 
+    /// <summary>Height of the carried flashlight above the floor.</summary>
+    private const float FlashlightHeight = 1.3f;
+
     private Content _content = null!;
     private TurnScheduler _sim = null!;
+    private FieldOfView _fov = null!;
+    private readonly DayNight _dayNight = new();
+    private readonly Node3D _lamps = new() { Name = "Lamps" };
+    private int _lampsVersion = -1;
+    private OmniLight3D _flashlightLight = null!;
+    private bool _flashlight;
+    private GameTime _startTime = GameTime.GameStart;
     private Town _town = null!;
     private WorldMap _world = null!;
     private WorldView _view = null!;
@@ -45,8 +57,10 @@ public partial class Main : Node3D
     public override void _Ready()
     {
         _content = new Content();
+        ParseOptions();
 
-        SetUpEnvironment();
+        AddChild(_dayNight);
+        AddChild(_lamps);
         _view = new WorldView { Art = _content.Art };
         TileVoxelizer.Registry = _content.Registry;
         AddChild(_view);
@@ -55,8 +69,20 @@ public partial class Main : Node3D
         AddChild(_body);
         _camera = new Camera3D { Position = new Vector3(0, EyeHeight, 0), Fov = 80, Near = 0.05f };
         _body.AddChild(_camera);
-        // A dim personal light so unlit interiors aren't pitch black (real lighting is M3).
-        _camera.AddChild(new OmniLight3D { OmniRange = 7, LightEnergy = 0.5f, LightColor = new Color(1f, 0.92f, 0.8f) });
+        // The carried flashlight: CDDA's lights shine all around, so this is an omni light at hand
+        // height. No shadows: in doorways they blacked out the floor ahead, and the fog of war
+        // already hides what the light reaches through walls.
+        _flashlightLight = new OmniLight3D
+        {
+            Position = new Vector3(0, FlashlightHeight, 0),
+            OmniRange = LightLevels.Range(LightLevels.Flashlight) + 1.5f,
+            OmniAttenuation = 1.4f,
+            LightEnergy = 1.6f,
+            LightColor = new Color(1f, 0.96f, 0.88f),
+            ShadowEnabled = false,
+            Visible = false,
+        };
+        _body.AddChild(_flashlightLight);
 
         _hud = new Label { Position = new Vector2(16, 16), MouseFilter = Control.MouseFilterEnum.Ignore };
         _hud.AddThemeColorOverride("font_shadow_color", Colors.Black);
@@ -71,6 +97,28 @@ public partial class Main : Node3D
         LoadTown();
         Input.MouseMode = Input.MouseModeEnum.Captured;
         ParseShots();
+    }
+
+    /// <summary>
+    /// <c>--time=HH:MM</c> (or <c>--time=day,HH:MM</c>, days counted from 0) starts the clock
+    /// there instead of 8:00 on spring day 1; <c>--flashlight</c> starts with it on.
+    /// </summary>
+    private void ParseOptions()
+    {
+        foreach (var arg in OS.GetCmdlineUserArgs())
+        {
+            if (arg == "--flashlight")
+            {
+                _flashlight = true;
+            }
+            else if (arg.StartsWith("--time=", StringComparison.Ordinal))
+            {
+                var parts = arg["--time=".Length..].Split(',');
+                var hm = parts[^1].Split(':');
+                int day = parts.Length > 1 ? int.Parse(parts[0]) : 0;
+                _startTime = GameTime.At(day, int.Parse(hm[0]), hm.Length > 1 ? int.Parse(hm[1]) : 0);
+            }
+        }
     }
 
     // Screenshot mode for checking visuals without playing:
@@ -146,6 +194,7 @@ public partial class Main : Node3D
             _pitch = shot.Pitch;
             ApplyLook();
             UpdateCutaway();
+            UpdateVision();
             UpdateHud();
         }
         // Give shadows, SSAO and the HUD a few frames to settle.
@@ -204,7 +253,10 @@ public partial class Main : Node3D
         _world = _town.Map;
         _warnings = _town.Warnings;
         _view.Display(_world);
-        _sim = new TurnScheduler(new PlayerActor());
+        // A new town keeps the clock running.
+        _sim = new TurnScheduler(new PlayerActor(), _sim?.Now ?? _startTime);
+        _fov = new FieldOfView(_world);
+        _lampsVersion = -1;
         _message = $"Generated a town of {_town.Lots.Count} houses (seed {_seed}) in {clock.ElapsedMilliseconds} ms. " +
                    $"CDDA data loaded in {_content.LoadMilliseconds} ms. " +
                    (_content.Art is { } art
@@ -225,6 +277,7 @@ public partial class Main : Node3D
         _pitch = 0;
         ApplyLook();
         UpdateCutaway();
+        UpdateVision();
         UpdateHud();
     }
 
@@ -277,6 +330,19 @@ public partial class Main : Node3D
             case Key.F:
                 SmashFacing();
                 break;
+            case Key.L:
+                ToggleFlashlight();
+                break;
+            // CDDA's 5 (and .) waits a turn; | opens its wait menu. Period is taken by > here.
+            case Key.Key5 or Key.Kp5:
+                Wait(1);
+                break;
+            case Key.Backslash when key.ShiftPressed:
+                WaitForDawnOrDusk();
+                break;
+            case Key.Backslash:
+                Wait(30 * GameTime.SecondsPerMinute);
+                break;
             // CDDA's < and >. The physical comma/period keys cover them shifted or not on US
             // layouts; other layouts land in the Unicode check below.
             case Key.Comma or Key.Pageup:
@@ -298,6 +364,7 @@ public partial class Main : Node3D
     {
         if (RunShots())
             return;
+        UpdateVision();
         if (_stepping || !_sim.PlayerCanAct)
             return;
 
@@ -391,6 +458,74 @@ public partial class Main : Node3D
     }
 
     private Vector2I Facing() => new Vector2I(_pos.X, _pos.Y) + SnapToOctant(1, 0);
+
+    /// <summary>
+    /// Brings sight, the sky and lamps up to date. Cheap when nothing changed: the sim only
+    /// recomputes FOV when you moved, a tile changed, the flashlight was switched or the light shifted.
+    /// </summary>
+    private void UpdateVision()
+    {
+        var now = _sim.Now;
+        _fov.Update(_pos, _flashlight ? LightLevels.Flashlight : 0, now);
+        _view.UpdateFog(_fov);
+        _dayNight.Show(now);
+        _flashlightLight.Visible = _flashlight;
+        if (_fov.Light.Version != _lampsVersion)
+        {
+            _lampsVersion = _fov.Light.Version;
+            UpdateLamps();
+        }
+    }
+
+    /// <summary>A Godot light for every tile with CDDA's light_emitted.</summary>
+    private void UpdateLamps()
+    {
+        foreach (var lamp in _lamps.GetChildren())
+            lamp.QueueFree();
+        foreach (var (pos, luminance) in _fov.Light.Emitters)
+        {
+            _lamps.AddChild(new OmniLight3D
+            {
+                Position = new Vector3(pos.X + 0.5f, WorldView.LevelBase(pos.Z) + 1.8f, pos.Y + 0.5f),
+                OmniRange = LightLevels.Range(luminance) + 1.5f,
+                OmniAttenuation = 1.4f,
+                LightEnergy = Mathf.Clamp(luminance / 150f, 0.3f, 2f),
+                LightColor = new Color(1f, 0.85f, 0.65f),
+                ShadowEnabled = true,
+            });
+        }
+    }
+
+    private void ToggleFlashlight()
+    {
+        if (_stepping || !_sim.PlayerCanAct)
+            return;
+        _flashlight = !_flashlight;
+        _message = _flashlight ? "You turn the flashlight on." : "You turn the flashlight off.";
+        _sim.SubmitPlayerAction(100);
+        UpdateHud();
+    }
+
+    /// <summary>Passes time doing nothing. CDDA would interrupt you when something shows up; nothing can yet.</summary>
+    private void Wait(int seconds)
+    {
+        if (_stepping || !_sim.PlayerCanAct)
+            return;
+        _sim.SubmitPlayerAction(seconds * 100);
+        _message = seconds < GameTime.SecondsPerMinute ? "You wait a moment." : $"You wait {seconds / GameTime.SecondsPerMinute} minutes.";
+        UpdateHud();
+    }
+
+    private void WaitForDawnOrDusk()
+    {
+        var now = _sim.Now;
+        var next = new[] { Celestial.Sunrise(now), Celestial.Sunset(now), Celestial.Sunrise(now.Plus(GameTime.SecondsPerDay)) }
+            .Where(t => t > now).Min();
+        bool dawn = next == Celestial.Sunrise(next);
+        Wait((int)(next.Seconds - now.Seconds));
+        _message = dawn ? "You wait until dawn." : "You wait until dusk.";
+        UpdateHud();
+    }
 
     private void CloseFacing()
     {
@@ -491,13 +626,19 @@ public partial class Main : Node3D
         string where = _town.Lots.FirstOrDefault(l => _pos.X >= l.X && _pos.X < l.X + l.Width && _pos.Y >= l.Y && _pos.Y < l.Y + l.Height)
             is { } lot ? lot.Building.Id : "street";
         string stairs = here.Has("GOES_UP") ? "  (< to go up)" : here.Has("GOES_DOWN") ? "  (> to go down)" : "";
+        var now = _sim.Now;
+        var (rise, set) = (Celestial.Sunrise(now), Celestial.Sunset(now));
+        float light = _fov.LightAt(_pos);
+        string lightWord = light >= LightLevels.AmbientLit ? "bright" : light >= LightLevels.AmbientLow ? "dim" : "dark";
         _hud.Text =
+            $"{now}  ·  sunrise {rise.Hour:00}:{rise.Minute:00}, sunset {set.Hour:00}:{set.Minute:00}  ·  " +
+            $"{lightWord} ({light:0}){(_flashlight ? "  ·  flashlight on" : "")}\n" +
             $"{where}  ·  z {_pos.Z:+0;-0;0}  ·  seed {_seed}  ·  turn {_sim.Turn}\n" +
             $"Here: {here.Name}{stairs}\n" +
             $"Ahead: {ahead}\n" +
             (_warnings.Count > 0 ? $"Mapgen gaps: {_warnings.Count}\n" : "") +
             $"{_message}\n\n" +
-            "WASD step · mouse look · walk into doors to open · C close · F smash · < > stairs, climb · N/B next/prev house · R reroll town · Esc mouse";
+            "WASD step · mouse look · walk into doors to open · C close · F smash · < > stairs, climb · L flashlight · 5 wait · \\ wait 30 min · | wait till dawn/dusk · N/B next/prev house · R reroll town · Esc mouse";
         UpdateTooltip(facing);
     }
 
@@ -540,41 +681,5 @@ public partial class Main : Node3D
         dot.SetAnchorsPreset(Control.LayoutPreset.Center);
         dot.Position -= new Vector2(2, 2);
         return dot;
-    }
-
-    private void SetUpEnvironment()
-    {
-        AddChild(new DirectionalLight3D
-        {
-            RotationDegrees = new Vector3(-48, 35, 0),
-            ShadowEnabled = true,
-            LightEnergy = 1.1f,
-            LightColor = new Color(1f, 0.96f, 0.88f),
-            DirectionalShadowMaxDistance = 80,
-        });
-        var sky = new ProceduralSkyMaterial
-        {
-            SkyTopColor = new Color(0.38f, 0.5f, 0.62f),
-            SkyHorizonColor = new Color(0.68f, 0.7f, 0.7f),
-            GroundBottomColor = new Color(0.2f, 0.2f, 0.18f),
-            GroundHorizonColor = new Color(0.55f, 0.55f, 0.5f),
-        };
-        AddChild(new WorldEnvironment
-        {
-            Environment = new Godot.Environment
-            {
-                BackgroundMode = Godot.Environment.BGMode.Sky,
-                Sky = new Sky { SkyMaterial = sky },
-                AmbientLightSource = Godot.Environment.AmbientSource.Sky,
-                AmbientLightEnergy = 0.55f,
-                TonemapMode = Godot.Environment.ToneMapper.Filmic,
-                SsaoEnabled = true,
-                SsaoRadius = 0.6f,
-                SsaoIntensity = 1.6f,
-                FogEnabled = true,
-                FogLightColor = new Color(0.62f, 0.64f, 0.64f),
-                FogDensity = 0.006f,
-            },
-        });
     }
 }
