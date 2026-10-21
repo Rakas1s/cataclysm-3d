@@ -47,6 +47,8 @@ public sealed class ContentDatabase
             LoadJsonText(File.ReadAllText(file), file);
     }
 
+    public void LoadFile(string path) => LoadJsonText(File.ReadAllText(path), path);
+
     public void LoadJsonText(string json, string source)
     {
         var root = JsonNode.Parse(json, documentOptions: ParseOptions);

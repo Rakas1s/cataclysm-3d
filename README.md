@@ -35,3 +35,27 @@ dotnet run --project tools/ImportCheck -c Release   # load + resolve all CDDA JS
 ```
 
 Then open `game/project.godot` in Godot .NET and press Play.
+
+![bungalow01 kitchen](docs/screenshots/m1-bungalow-kitchen.png)
+
+### Controls (M1)
+
+| Key | Action |
+|---|---|
+| WASD | Step to one of the 8 neighboring tiles, relative to where you look |
+| Mouse | Look (free, costs no time) |
+| Walk into a door | Open it |
+| C | Close the door you're facing |
+| F | Smash what you're facing (windows break easily; locked doors take many kicks) |
+| N / B | Next / previous house (all 143 CDDA house ground floors) |
+| R | Re-roll the current house with a new seed (wall paint, flooring, variants) |
+| Esc | Release / capture the mouse |
+
+Screenshot mode for checking visuals without playing:
+
+```powershell
+godot --path game -- --shot=out.png,12,28,0,4   # file, house-local tile x, y, yaw°, pitch°
+```
+
+Mapgen debugging: `dotnet run --project tools/ImportCheck -c Release -- --print bungalow01_1 3`
+prints a generated house as ASCII.

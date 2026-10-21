@@ -7,4 +7,8 @@
     <RootNamespace>Cataclysm3D.Importer</RootNamespace>
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\Sim\Cataclysm3D.Sim.csproj" />
+  </ItemGroup>
+
 </Project>
