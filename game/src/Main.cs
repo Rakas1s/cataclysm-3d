@@ -52,11 +52,13 @@ public partial class Main : Node3D
     private Label _deathNotice = null!;
     private ColorRect _hurtFlash = null!;
     private readonly InteractionTooltip _tooltip = new();
+    private readonly CharacterPanel _character = new();
     private string _tooltipState = "";
 
     private int _lotIndex;
     private int _seed = 1;
     private bool _noZombies;
+    private bool _female;
     private readonly List<(int Dx, int Dy, string Id)> _extraZombies = new();
     private int _shotWaitTurns;
     private bool _shotFight;
@@ -77,6 +79,7 @@ public partial class Main : Node3D
         TileVoxelizer.Registry = _content.Registry;
         AddChild(_view);
         _creatures.Art = _content.Art;
+        _character.Art = _content.Art;
         AddChild(_creatures);
 
         _body = new Node3D();
@@ -137,6 +140,7 @@ public partial class Main : Node3D
         canvas.AddChild(_deathNotice);
         canvas.AddChild(Crosshair());
         canvas.AddChild(_tooltip);
+        canvas.AddChild(_character);
         AddChild(canvas);
 
         LoadTown();
@@ -146,7 +150,8 @@ public partial class Main : Node3D
 
     /// <summary>
     /// <c>--time=HH:MM</c> (or <c>--time=day,HH:MM</c>, days counted from 0) starts the clock
-    /// there instead of 8:00 on spring day 1; <c>--flashlight</c> starts with it on.
+    /// there instead of 8:00 on spring day 1; <c>--flashlight</c> starts with it on; <c>--female</c>
+    /// plays a woman (CDDA's female sprite and clothes).
     /// <c>--no-zombies</c> leaves the town empty; <c>--zombie=dx,dy[,id]</c> adds a monster
     /// (default mon_zombie) that many tiles east and south of where you start (or of the first
     /// shot). <c>--wait=N</c> waits N turns before each shot, so monsters can close in, and
@@ -159,6 +164,10 @@ public partial class Main : Node3D
             if (arg == "--flashlight")
             {
                 _flashlight = true;
+            }
+            else if (arg == "--female")
+            {
+                _female = true;
             }
             else if (arg == "--no-zombies")
             {
@@ -350,7 +359,13 @@ public partial class Main : Node3D
         _view.Display(_world);
         // A new town keeps the clock running, unless you died.
         var now = _game is { Player.IsDead: false } ? _game.Scheduler.Now : _startTime;
-        _game = new GameWorld(_world, new PlayerActor(bodyParts: _content.BodyParts), StartFor(_town.Lots[_lotIndex]), now, _seed);
+        var player = new PlayerActor(bodyParts: _content.BodyParts)
+        {
+            Male = !_female,
+            Hair = _content.RandomHair(new Random(_seed)),
+            Worn = _content.StartingOutfit(!_female),
+        };
+        _game = new GameWorld(_world, player, StartFor(_town.Lots[_lotIndex]), now, _seed);
         if (!_noZombies)
             TownPopulation.Populate(_game, _town, _content.Monsters, _seed);
         _creatures.Clear();
@@ -820,23 +835,16 @@ public partial class Main : Node3D
         string lightWord = light >= LightLevels.AmbientLit ? "bright" : light >= LightLevels.AmbientLow ? "dim" : "dark";
         _hud.Text =
             $"{now}  ·  sunrise {rise.Hour:00}:{rise.Minute:00}, sunset {set.Hour:00}:{set.Minute:00}  ·  " +
-            $"{lightWord} ({light:0}){(_flashlight ? "  ·  flashlight on" : "")}\n" +
+            $"{lightWord} ({light:0})\n" +
             $"{where}  ·  z {Pos.Z:+0;-0;0}  ·  seed {_seed}  ·  turn {_game.Scheduler.Turn}\n" +
-            $"{BodyStatus()}\n" +
             $"Here: {here.Name}{stairs}\n" +
             $"Ahead: {ahead}\n" +
             (_warnings.Count > 0 ? $"Mapgen gaps: {_warnings.Count}\n" : "") +
             $"{_message}\n\n" +
             "WASD step · walk into a monster to punch it · mouse look · walk into doors to open · C close · F smash · < > stairs, climb · L flashlight · 5 wait · \\ wait 30 min · | wait till dawn/dusk · N/B next/prev house · R reroll town · Esc mouse";
         UpdateTooltip(facing);
+        _character.Refresh(_game.Player, _flashlight);
         _log.Text = string.Join("\n", _game.Messages.Skip(Math.Max(0, _game.Messages.Count - LogLines)).Select(m => m.Text));
-    }
-
-    /// <summary>Hit points per body part, like CDDA's sidebar: "head 60  torso 52  left arm 60 …".</summary>
-    private string BodyStatus()
-    {
-        var body = _game.Player.Body;
-        return string.Join("  ", body.Parts.Select((p, i) => $"{p.Name} {body.Hp(i)}"));
     }
 
     /// <summary>Lists the top three things you can do to the tile you face, with their keys.</summary>

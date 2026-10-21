@@ -5,11 +5,11 @@ namespace Cataclysm3D.Importer;
 /// <summary>Readers for CDDA's loosely typed JSON fields.</summary>
 internal static class Json
 {
-    /// <summary>CDDA names are either a string or { "str": ..., "str_pl": ... }.</summary>
+    /// <summary>CDDA names are either a string or { "str": ... } / { "str_sp": ... } (same singular and plural).</summary>
     public static string Name(JsonObject data, string fallback) => data["name"] switch
     {
         JsonValue v when v.TryGetValue(out string? s) => s,
-        JsonObject o when o["str"] is JsonValue sv && sv.TryGetValue(out string? s2) => s2,
+        JsonObject o when (o["str"] ?? o["str_sp"]) is JsonValue sv && sv.TryGetValue(out string? s2) => s2,
         _ => fallback,
     };
 

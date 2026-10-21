@@ -138,10 +138,17 @@ public sealed class TileArt
     /// The sprite for any id with art (monsters, corpses), trying <paramref name="ids"/> in order.
     /// <paramref name="variant"/> picks among random variants, so each monster keeps its look.
     /// </summary>
-    public SpriteChoice? ChooseAny(int variant, params string[] ids)
+    public SpriteChoice? ChooseAny(int variant, params string[] ids) => ChooseAny(variant, null, ids);
+
+    /// <summary>
+    /// Like <see cref="ChooseAny(int, string[])"/>, but only from <paramref name="only"/> when it's
+    /// given: layered sprites (the player and their clothes) must come from one tileset to line up.
+    /// </summary>
+    public SpriteChoice? ChooseAny(int variant, Tileset? only, params string[] ids)
     {
         foreach (var id in ids)
-            if (_resolver.Resolve(id, Season) is { } hit && SpriteResolver.Choose(hit, variant, 0) is { Fg: >= 0 } c)
+            if ((only is null ? _resolver.Resolve(id, Season) : _resolver.ResolveIn(only, id, Season)) is { } hit
+                && SpriteResolver.Choose(hit, variant, 0) is { Fg: >= 0 } c)
                 return c;
         return null;
     }

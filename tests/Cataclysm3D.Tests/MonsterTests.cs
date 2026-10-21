@@ -329,6 +329,51 @@ public class MonsterTests
         Assert.InRange(counts[head] / 10000.0, 0.03, 0.07);
     }
 
+    // ---- starting outfit ---------------------------------------------------------------------
+
+    [Fact]
+    public void YouStartInYourProfessionsClothesInnermostFirst()
+    {
+        var db = new ContentDatabase();
+        db.LoadJsonText("""
+            [
+              { "type": "profession", "id": "unemployed", "items": {
+                "both": { "entries": [{ "item": "jeans" }, { "item": "longshirt" }, { "item": "mbag" }, { "item": "pockknife" }, { "group": "starter_wallet" }] },
+                "male": { "entries": [{ "item": "boxer_shorts" }] }, "female": { "entries": [{ "item": "bra" }] } } },
+              { "type": "ITEM", "id": "jeans", "name": { "str_sp": "jeans" }, "armor": [{}] },
+              { "type": "ITEM", "id": "longshirt", "name": { "str": "long-sleeved shirt" }, "flags": ["SKINTIGHT"], "armor": [{}] },
+              { "type": "ITEM", "id": "mbag", "name": { "str": "messenger bag" }, "flags": ["BELTED"], "armor": [{}] },
+              { "type": "ITEM", "id": "boxer_shorts", "name": { "str": "boxer shorts" }, "flags": ["SKINTIGHT"], "armor": [{}] },
+              { "type": "ITEM", "id": "pockknife", "name": { "str": "pocket knife" } }
+            ]
+            """, "outfit.json");
+        var male = Outfit.Starting(db, "unemployed", male: true);
+        Assert.Equal(new[] { "longshirt", "boxer_shorts", "jeans", "mbag" }, male.Select(c => c.Id));
+        Assert.Equal("jeans", male[2].Name);
+        Assert.DoesNotContain(Outfit.Starting(db, "unemployed", male: false), c => c.Id == "boxer_shorts");
+    }
+
+    [Fact]
+    public void HairIsARandomStyleTraitInANaturalColor()
+    {
+        var db = new ContentDatabase();
+        db.LoadJsonText("""
+            [
+              { "type": "mutation", "id": "hair_bald", "types": ["hair_style"] },
+              { "type": "mutation", "id": "hair_medium", "types": ["hair_style"],
+                "variants": [{ "id": "black" }, { "id": "blue" }, { "id": "brown" }] },
+              { "type": "mutation", "id": "eye_color", "types": ["eye_color"], "variants": [{ "id": "brown" }] }
+            ]
+            """, "hair.json");
+        var rng = new Random(4);
+        for (int i = 0; i < 50; i++)
+        {
+            var hair = Outfit.RandomHair(db, rng)!;
+            Assert.Equal("hair_medium", hair.Style);
+            Assert.Contains(hair.Color, new[] { "black", "brown" });
+        }
+    }
+
     // ---- waiting -------------------------------------------------------------------------
 
     [Fact]

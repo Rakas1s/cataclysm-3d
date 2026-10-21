@@ -46,6 +46,9 @@ public sealed class SpriteResolver
         return found;
     }
 
+    /// <summary>Like <see cref="Resolve(string, string?)"/>, but only looks in one tileset (uncached).</summary>
+    public ResolvedTile? ResolveIn(Tileset set, string id, string? season = null) => Resolve(id, season, new[] { set });
+
     /// <summary>Like <see cref="Resolve(string, string?)"/>, but only looks in the primary (first) tileset.</summary>
     public ResolvedTile? ResolvePrimary(string id, string? season = null) =>
         _tilesets.Count == 0 ? null : Resolve(id, season, _tilesets.Take(1).ToList());

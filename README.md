@@ -84,9 +84,11 @@ they see you from 40 tiles; at night only from a few, unless your flashlight giv
 They walk around walls and through open doors, smash windows to get in, and need help to break
 down a door. Next to you, they claw at you.
 
-Walk into a zombie to punch it. The HUD shows your hit points per body part and a message log;
-you die when your head or torso reaches 0, and Enter starts a new run. Waiting stops when a
-zombie comes into view or hurts you. See [docs/divergences.md](docs/divergences.md) for how the
+Walk into a zombie to punch it. A panel in the bottom-right corner shows you as CDDA draws you
+(the tileset's body with a sprite for each thing you wear, starting in the Unemployed
+profession's clothes, and a random CDDA hair style), your hit points per body part colored by health, your stats and your
+gear; the message log sits in the bottom-left. You die when your head or torso reaches 0, and Enter
+starts a new run. Waiting stops when a zombie comes into view or hurts you. See [docs/divergences.md](docs/divergences.md) for how the
 rules differ from CDDA.
 
 ![Zombies closing in on the street](docs/screenshots/m4-zombies.png)
@@ -129,7 +131,7 @@ Add `--time=HH:MM` (or `--time=day,HH:MM`, days from 0) to set the clock and `--
 have it on, e.g. `godot --path game -- --time=23:30 --flashlight --shot=night.png,@f_fridge,3,0,-12`.
 Shots in one run share what you've seen, so later shots show remembered tiles.
 
-Monsters: `--no-zombies` leaves the town empty, `--zombie=dx,dy[,id]` puts a monster (default
+`--female` plays a woman (the female body sprite and clothes). Monsters: `--no-zombies` leaves the town empty, `--zombie=dx,dy[,id]` puts a monster (default
 `mon_zombie`) dx tiles east and dy south of the first shot, `--wait=N` waits N turns before each
 shot so they can close in, and `--fight` then punches whatever is next to you until one of you
 dies, e.g. `godot --path game -- --no-zombies --zombie=0,-4 --wait=6 --fight --shot=fight.png,12,-1,0,-20`.

@@ -1,4 +1,5 @@
 using Cataclysm3D.Sim.Creatures;
+using Cataclysm3D.Sim.Items;
 using Cataclysm3D.Sim.World;
 
 namespace Cataclysm3D.Sim;
@@ -34,6 +35,15 @@ public sealed class PlayerActor : Actor
 
     /// <summary>Per-body-part hit points.</summary>
     public Body Body { get; }
+
+    /// <summary>Picks the male or female base sprite and gendered clothing art, as CDDA does.</summary>
+    public bool Male { get; init; } = true;
+
+    /// <summary>Your hair style and color, or null for bald.</summary>
+    public Hair? Hair { get; init; }
+
+    /// <summary>What you have on, innermost layer first.</summary>
+    public IReadOnlyList<Clothing> Worn { get; init; } = Array.Empty<Clothing>();
 
     /// <summary>Luminance of the light the player carries (a flashlight that's on), or 0.</summary>
     public float CarriedLight { get; set; }
