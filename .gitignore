@@ -1,0 +1,20 @@
+# Godot
+.godot/
+*.import
+export_presets.cfg
+/android/
+
+# .NET
+bin/
+obj/
+*.user
+.vs/
+.idea/
+TestResults/
+
+# Fetched CDDA content (re-created by tools/fetch-cdda-snapshot.ps1)
+/cdda-snapshot/*
+!/cdda-snapshot/README.md
+
+# Generated import cache
+/cache/

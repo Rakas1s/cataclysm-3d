@@ -1,0 +1,48 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Cataclysm3D.Sim", "src\Sim\Cataclysm3D.Sim.csproj", "{6B1D3C1E-5F0A-4E61-9C41-1A2B3C4D5E01}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Cataclysm3D.Importer", "src\Importer\Cataclysm3D.Importer.csproj", "{6B1D3C1E-5F0A-4E61-9C41-1A2B3C4D5E02}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Cataclysm3D.Tests", "tests\Cataclysm3D.Tests\Cataclysm3D.Tests.csproj", "{6B1D3C1E-5F0A-4E61-9C41-1A2B3C4D5E03}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Cataclysm3D", "game\Cataclysm3D.csproj", "{6B1D3C1E-5F0A-4E61-9C41-1A2B3C4D5E04}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tools", "tools", "{49F70570-6E3F-43CF-9D3D-6B431830C7BA}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ImportCheck", "tools\ImportCheck\ImportCheck.csproj", "{98F719BB-46BB-48FA-9091-D2124128BE4F}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{6B1D3C1E-5F0A-4E61-9C41-1A2B3C4D5E01}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6B1D3C1E-5F0A-4E61-9C41-1A2B3C4D5E01}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6B1D3C1E-5F0A-4E61-9C41-1A2B3C4D5E01}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6B1D3C1E-5F0A-4E61-9C41-1A2B3C4D5E01}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6B1D3C1E-5F0A-4E61-9C41-1A2B3C4D5E02}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6B1D3C1E-5F0A-4E61-9C41-1A2B3C4D5E02}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6B1D3C1E-5F0A-4E61-9C41-1A2B3C4D5E02}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6B1D3C1E-5F0A-4E61-9C41-1A2B3C4D5E02}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6B1D3C1E-5F0A-4E61-9C41-1A2B3C4D5E03}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6B1D3C1E-5F0A-4E61-9C41-1A2B3C4D5E03}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6B1D3C1E-5F0A-4E61-9C41-1A2B3C4D5E03}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6B1D3C1E-5F0A-4E61-9C41-1A2B3C4D5E03}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6B1D3C1E-5F0A-4E61-9C41-1A2B3C4D5E04}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6B1D3C1E-5F0A-4E61-9C41-1A2B3C4D5E04}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6B1D3C1E-5F0A-4E61-9C41-1A2B3C4D5E04}.Release|Any CPU.ActiveCfg = Debug|Any CPU
+		{6B1D3C1E-5F0A-4E61-9C41-1A2B3C4D5E04}.Release|Any CPU.Build.0 = Debug|Any CPU
+		{98F719BB-46BB-48FA-9091-D2124128BE4F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{98F719BB-46BB-48FA-9091-D2124128BE4F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{98F719BB-46BB-48FA-9091-D2124128BE4F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{98F719BB-46BB-48FA-9091-D2124128BE4F}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{98F719BB-46BB-48FA-9091-D2124128BE4F} = {49F70570-6E3F-43CF-9D3D-6B431830C7BA}
+	EndGlobalSection
+EndGlobal

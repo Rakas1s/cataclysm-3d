@@ -1,0 +1,37 @@
+# cataclysm-3d
+
+A first-person, turn-based, voxel 3D reimplementation of
+[Cataclysm: Dark Days Ahead](https://github.com/CleverRaven/Cataclysm-DDA), built in Godot 4 (C#)
+and driven by CDDA's own JSON content.
+
+This is an unofficial fan project, not affiliated with CleverRaven. Game content and tilesets come
+from CDDA under CC-BY-SA 3.0. See [CREDITS.md](CREDITS.md).
+
+See [PLAN.md](PLAN.md) for the roadmap.
+
+## Layout
+
+| Path | What |
+|---|---|
+| `src/Sim` | Pure C# simulation core (no Godot types). Turns, map, creatures, rules. |
+| `src/Importer` | Loads CDDA JSON and resolves `copy-from` / `extend` / `delete` / `relative` / `proportional`. |
+| `game/` | Godot 4 .NET project: rendering, input, UI. References `Sim` and `Importer`. |
+| `tests/` | xUnit tests for `Sim` and `Importer`. |
+| `cdda-snapshot/` | Pinned CDDA data and tilesets, fetched by `tools/fetch-cdda-snapshot.ps1`. |
+| `config/` | Project config (tileset priority, etc.). |
+| `docs/` | Design notes and the list of deliberate divergences from CDDA. |
+
+## Requirements
+
+- .NET 8 SDK
+- Godot 4 **.NET** edition (the `Godot.NET.Sdk` version in `game/Cataclysm3D.csproj` must match it)
+
+## Getting started
+
+```powershell
+./tools/fetch-cdda-snapshot.ps1   # pull pinned CDDA data + tilesets into cdda-snapshot/
+dotnet test                       # run the sim/importer tests
+dotnet run --project tools/ImportCheck -c Release   # load + resolve all CDDA JSON, report gaps
+```
+
+Then open `game/project.godot` in Godot .NET and press Play.

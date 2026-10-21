@@ -1,0 +1,16 @@
+<Project Sdk="Godot.NET.Sdk/4.7.2">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Cataclysm3D.Game</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\src\Sim\Cataclysm3D.Sim.csproj" />
+    <ProjectReference Include="..\src\Importer\Cataclysm3D.Importer.csproj" />
+  </ItemGroup>
+
+</Project>

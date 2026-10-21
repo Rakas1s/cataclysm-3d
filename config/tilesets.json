@@ -1,0 +1,17 @@
+{
+  "//": "Sprite sources for voxel generation, in priority order. The first tileset that has a sprite for an id wins; later ones are fallbacks.",
+  "tilesets": [
+    {
+      "name": "UndeadPeople (MSX++ UnDeadPeople Edition v2)",
+      "repo": "https://github.com/Goodgulf-PL/UndeadPeopleTileset_Unpacked_New_Version.git",
+      "branch": "main",
+      "repoPath": "dda/gfx/MSX++UnDeadPeopleEdition_v2",
+      "path": "cdda-snapshot/gfx/UndeadPeople"
+    },
+    {
+      "name": "Ultica",
+      "repoPath": "gfx/UltimateCataclysm",
+      "path": "cdda-snapshot/gfx/UltimateCataclysm"
+    }
+  ]
+}
