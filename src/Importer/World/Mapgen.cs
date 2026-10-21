@@ -1,4 +1,6 @@
 using System.Text.Json.Nodes;
+using Cataclysm3D.Importer.Items;
+using Cataclysm3D.Sim.Items;
 using Cataclysm3D.Sim.World;
 
 namespace Cataclysm3D.Importer.World;
@@ -49,13 +51,18 @@ public sealed record MapgenResult(TileGrid Map, IReadOnlyList<string> Warnings)
 {
     /// <summary>Monsters rolled from <c>place_monsters</c> and <c>place_monster</c>, not yet resolved to types.</summary>
     public IReadOnlyList<MonsterSpawn> Spawns { get; init; } = Array.Empty<MonsterSpawn>();
+
+    /// <summary>Items rolled from the item tables and <c>place_*</c> lists, at map tiles.</summary>
+    public IReadOnlyList<(Item Item, int X, int Y)> Items { get; init; } = Array.Empty<(Item, int, int)>();
 }
 
 /// <summary>
 /// Runs CDDA JSON mapgen: <c>rows</c> + palettes (nested, parametrized) + <c>terrain</c> /
 /// <c>furniture</c> / <c>mapping</c> symbol tables + <c>fill_ter</c>, and rolls
-/// <c>place_monsters</c> / <c>place_monster</c> into <see cref="MonsterSpawn"/>s. Items, nested
-/// chunks and loot are not placed yet.
+/// <c>place_monsters</c> / <c>place_monster</c> into <see cref="MonsterSpawn"/>s. With an
+/// <see cref="ItemRegistry"/>, it also places items: the <c>items</c> and <c>item</c> symbol
+/// tables and the <c>place_items</c>, <c>place_loot</c> and <c>place_item</c> lists. Nested
+/// chunks are not placed yet.
 /// </summary>
 public sealed class MapgenGenerator
 {
@@ -67,6 +74,9 @@ public sealed class MapgenGenerator
 
     /// <summary>Regional pseudo ids (t_region_groundcover, …) → weighted real ids, from region_settings.</summary>
     private readonly Dictionary<string, JsonObject> _regional = new(StringComparer.Ordinal);
+
+    /// <summary>Where items come from; null places none.</summary>
+    public ItemRegistry? Items { get; init; }
 
     public MapgenGenerator(ContentDatabase db, TileRegistry registry, MapgenLibrary library, string region = "default")
     {
@@ -124,20 +134,111 @@ public sealed class MapgenGenerator
         var map = new TileGrid(_registry, width, height, fill);
 
         var unknownSymbols = new SortedSet<string>(StringComparer.Ordinal);
+        var items = new List<(Item, int, int)>();
+        // Items roll from their own stream, so loot never shifts the terrain a seed gives.
+        var loot = new Context(new Random(unchecked(seed * 7919 + 17)), _db);
         for (int y = 0; y < rows.Count; y++)
         {
             int x = 0;
             foreach (var rune in rows[y].EnumerateRunes())
             {
                 PlaceSymbol(map, ctx, x, y, rune.ToString(), unknownSymbols);
+                if (Items is not null)
+                    PlaceSymbolItems(ctx, loot, x, y, rune.ToString(), items);
                 x++;
             }
         }
+        if (Items is not null)
+            PlaceItemLists(obj, loot, items);
+        ctx.Warnings.AddRange(loot.Warnings);
 
         foreach (var s in unknownSymbols)
             ctx.Warnings.Add($"symbol '{s}' has no terrain or furniture");
-        return new MapgenResult(map, ctx.Warnings) { Spawns = Spawns(obj, ctx) };
+        return new MapgenResult(map, ctx.Warnings) { Spawns = Spawns(obj, ctx), Items = items };
     }
+
+    /// <summary>
+    /// CDDA's <c>place_items</c> rule for an item group: <c>chance</c> percent that it spawns
+    /// once, rolled per <c>repeat</c>.
+    /// </summary>
+    private void PlaceGroup(Context ctx, JsonNode? group, JsonNode? chance, JsonNode? repeat, int x, int y,
+        List<(Item, int, int)> into, int defaultChance)
+    {
+        if (group is null)
+            return;
+        var resolved = group is JsonValue v && v.TryGetValue(out string? id) ? Items!.Group(id) : ItemLoader.InlineGroup(group, "mapgen");
+        if (resolved is null)
+        {
+            ctx.Warn($"unknown item group {group.ToJsonString()}");
+            return;
+        }
+        int percent = ctx.Roll(chance, defaultChance);
+        for (int i = ctx.Roll(repeat, 1); i > 0; i--)
+            if (ctx.Next(100) < percent)
+                foreach (var item in Items!.Roll(resolved, ctx.Rng))
+                    into.Add((item, x, y));
+    }
+
+    /// <summary>CDDA's <c>item</c> / <c>place_item</c>: an item id, <c>amount</c> of it, <c>chance</c> percent per <c>repeat</c>.</summary>
+    private void PlaceItem(Context ctx, JsonObject e, int x, int y, List<(Item, int, int)> into)
+    {
+        if (Json.FirstString(e["item"]) is not { } id)
+        {
+            // sealed_item and some loot write the item as an inline group.
+            if (e["item"] is { } inline)
+                PlaceGroup(ctx, inline, e["chance"], e["repeat"], x, y, into, 100);
+            return;
+        }
+        if (Items!.Type(id) is null)
+        {
+            ctx.Warn($"unknown item \"{id}\"");
+            return;
+        }
+        int percent = ctx.Roll(e["chance"], 100);
+        for (int i = ctx.Roll(e["repeat"], 1); i > 0; i--)
+        {
+            if (ctx.Next(100) >= percent)
+                continue;
+            for (int n = ctx.Roll(e["amount"], 1); n > 0; n--)
+                if (Items.Create(id, rng: ctx.Rng) is { } item)
+                    into.Add((item, x, y));
+        }
+    }
+
+    private void PlaceSymbolItems(Context ctx, Context loot, int x, int y, string symbol, List<(Item, int, int)> into)
+    {
+        if (ctx.ItemGroups.TryGetValue(symbol, out var groups))
+            foreach (var e in Entries(groups))
+                PlaceGroup(loot, e["item"], e["chance"], e["repeat"], x, y, into, 1);
+        if (ctx.SingleItems.TryGetValue(symbol, out var singles))
+            foreach (var e in Entries(singles))
+                PlaceItem(loot, e, x, y, into);
+    }
+
+    /// <summary><c>place_items</c>, <c>place_loot</c> (a group or an item) and <c>place_item</c>, at their <c>x</c>, <c>y</c>.</summary>
+    private void PlaceItemLists(JsonObject obj, Context ctx, List<(Item, int, int)> into)
+    {
+        foreach (var e in Entries(obj["place_items"]))
+            PlaceGroup(ctx, e["item"], e["chance"], e["repeat"], ctx.Roll(e["x"], 0), ctx.Roll(e["y"], 0), into, 1);
+        foreach (var e in Entries(obj["place_loot"]))
+        {
+            int x = ctx.Roll(e["x"], 0), y = ctx.Roll(e["y"], 0);
+            if (e["group"] is { } group)
+                PlaceGroup(ctx, group, e["chance"], e["repeat"], x, y, into, 100);
+            else
+                PlaceItem(ctx, e, x, y, into);
+        }
+        foreach (var e in Entries(obj["place_item"]))
+            PlaceItem(ctx, e, ctx.Roll(e["x"], 0), ctx.Roll(e["y"], 0), into);
+    }
+
+    /// <summary>A table value that is one entry or a list of them.</summary>
+    private static IEnumerable<JsonObject> Entries(JsonNode? node) => node switch
+    {
+        JsonArray a => a.OfType<JsonObject>(),
+        JsonObject o => new[] { o },
+        _ => Enumerable.Empty<JsonObject>(),
+    };
 
     /// <summary>
     /// Rolls the monster placements. <c>place_monsters</c> (a group) fires with a one-in-<c>chance</c>
@@ -218,6 +319,12 @@ public sealed class MapgenGenerator
         public Dictionary<string, JsonNode> Terrain { get; } = new(StringComparer.Ordinal);
         public Dictionary<string, JsonNode> Furniture { get; } = new(StringComparer.Ordinal);
 
+        /// <summary>The <c>items</c> table: symbol → item group placements.</summary>
+        public Dictionary<string, JsonNode> ItemGroups { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>The <c>item</c> table: symbol → single item placements.</summary>
+        public Dictionary<string, JsonNode> SingleItems { get; } = new(StringComparer.Ordinal);
+
         /// <summary>Symbols used by tables we don't place yet (items, monsters, nested chunks, …).</summary>
         public HashSet<string> OtherSymbols { get; } = new(StringComparer.Ordinal);
 
@@ -230,6 +337,8 @@ public sealed class MapgenGenerator
         }
 
         public int Next(int max) => _rng.Next(max);
+
+        public Random Rng => _rng;
 
         /// <summary>A mapgen number: an int, or [min, max] rolled inclusively.</summary>
         public int Roll(JsonNode? node, int fallback) => node switch
@@ -296,6 +405,8 @@ public sealed class MapgenGenerator
         {
             Merge(Terrain, source["terrain"] as JsonObject);
             Merge(Furniture, source["furniture"] as JsonObject);
+            Merge(ItemGroups, source["items"] as JsonObject);
+            Merge(SingleItems, source["item"] as JsonObject);
             if (source["mapping"] is JsonObject mapping)
             {
                 foreach (var (symbol, def) in mapping)
@@ -306,6 +417,10 @@ public sealed class MapgenGenerator
                         Terrain[symbol] = t;
                     if (m["furniture"] is { } f)
                         Furniture[symbol] = f;
+                    if (m["items"] is { } i)
+                        ItemGroups[symbol] = i;
+                    if (m["item"] is { } si)
+                        SingleItems[symbol] = si;
                 }
             }
             // Shorthand tables that place one fixed piece of furniture or terrain per symbol.

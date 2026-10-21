@@ -9,7 +9,8 @@ namespace Cataclysm3D.Game.UI;
 /// <summary>
 /// The character panel in the bottom-right corner: a portrait of you drawn the way CDDA draws
 /// the player (the tileset's base body with an overlay for everything you wear and wield), your
-/// hit points per body part colored by health, your stats, and your gear. Styled like
+/// hit points per body part colored by health, your stats, hunger, thirst and sleepiness, and
+/// your gear. Styled like
 /// <see cref="InteractionTooltip"/> and, like it, ignores the mouse.
 /// </summary>
 public partial class CharacterPanel : PanelContainer
@@ -26,6 +27,7 @@ public partial class CharacterPanel : PanelContainer
     private readonly TextureRect _portrait = new();
     private readonly GridContainer _parts = new() { Columns = 2 };
     private readonly GridContainer _gear = new() { Columns = 2 };
+    private readonly HBoxContainer _needs = new() { MouseFilter = MouseFilterEnum.Ignore };
     private string _state = "";
     private string _look = "";
     private int _lastHp = -1;
@@ -76,8 +78,11 @@ public partial class CharacterPanel : PanelContainer
         _gear.AddThemeConstantOverride("h_separation", 10);
         _gear.AddThemeConstantOverride("v_separation", 0);
 
+        _needs.AddThemeConstantOverride("separation", 10);
+
         box.AddChild(title);
         box.AddChild(body);
+        box.AddChild(_needs);
         box.AddChild(new HSeparator { MouseFilter = MouseFilterEnum.Ignore, Modulate = new Color(1, 1, 1, 0.3f) });
         box.AddChild(_gear);
         AddChild(box);
@@ -95,8 +100,9 @@ public partial class CharacterPanel : PanelContainer
     {
         var body = player.Body;
         var hp = Enumerable.Range(0, body.Parts.Count).Select(body.Hp).ToArray();
-        string look = $"{player.Male}|{player.Hair}|{string.Join(",", player.Worn.Select(c => c.Id))}";
-        string state = $"{string.Join(",", hp)}|{player.Str}|{player.Dex}|{player.Speed}|{flashlight}|{look}";
+        string look = $"{player.Male}|{player.Hair}|{string.Join(",", player.Worn.Select(c => c.Id))}|{player.Wielded?.Id}";
+        var needs = new[] { player.Needs.HungerStatus, player.Needs.ThirstStatus, player.Needs.SleepinessStatus };
+        string state = $"{string.Join(",", hp)}|{player.Str}|{player.Dex}|{player.Speed}|{flashlight}|{look}|{player.Inventory.Version}|{string.Join(",", needs)}|{player.Asleep}";
         if (state == _state)
             return;
         _state = state;
@@ -104,7 +110,7 @@ public partial class CharacterPanel : PanelContainer
         if (look != _look)
         {
             _look = look;
-            _portrait.Texture = Portrait(player);
+            _portrait.Texture = Portrait(Art, player);
         }
         // A red flash on the portrait when you're hurt.
         int total = hp.Sum();
@@ -126,10 +132,18 @@ public partial class CharacterPanel : PanelContainer
             _parts.AddChild(value);
         }
 
+        Clear(_needs);
+        foreach (var n in needs.Where(n => n.Text.Length > 0))
+            _needs.AddChild(Text(n.Text, 13, NeedColor(n.Severity)));
+        if (player.Asleep)
+            _needs.AddChild(Text("Asleep", 13, new Color(0.6f, 0.7f, 1f)));
+        _needs.Visible = _needs.GetChildCount() > 0;
+
         Clear(_gear);
-        // No weapons until M5: you fight bare-handed.
-        AddGear("Wielding", "fists");
+        AddGear("Wielding", player.Wielded?.DisplayName ?? "fists");
         AddGear("Wearing", WornText(player.Worn));
+        var inv = player.Inventory;
+        AddGear("Carrying", $"{Format.Weight(inv.WeightMg)} / {Format.Weight(player.WeightCapacityMg)} · {Format.Volume(inv.VolumeCarriedMl)} / {Format.Volume(inv.VolumeCapacityMl)}");
         AddGear("Flashlight", flashlight ? "on" : "off");
     }
 
@@ -137,12 +151,12 @@ public partial class CharacterPanel : PanelContainer
     /// The main garments first, then what's underneath, then accessories, on one line:
     /// "jeans, sneakers (pair) +5". The portrait shows the rest.
     /// </summary>
-    private static string WornText(IReadOnlyList<Clothing> worn)
+    private static string WornText(IReadOnlyList<Item> worn)
     {
         if (worn.Count == 0)
             return "nothing";
-        var names = worn.OrderBy(c => c.Layer switch { WornLayer.Normal => 0, WornLayer.Skintight => 1, _ => 2 })
-            .Select(c => c.Name).ToList();
+        var names = worn.OrderBy(c => c.Type.Armor?.Layer switch { WornLayer.Normal => 0, WornLayer.Outer => 0, WornLayer.Skintight => 1, _ => 2 })
+            .Select(c => c.Type.Name).ToList();
         return names.Count <= MaxWornNames
             ? string.Join(", ", names)
             : $"{string.Join(", ", names.Take(MaxWornNames))} +{names.Count - MaxWornNames}";
@@ -150,13 +164,13 @@ public partial class CharacterPanel : PanelContainer
 
     /// <summary>
     /// The tileset's player body with an overlay per worn item on top, innermost first, as CDDA
-    /// layers them, and your hair over everything. Gendered overlays (<c>overlay_male_worn_longshirt</c>) win over plain ones.
+    /// layers them, your hair over that, and what you wield on top (<c>overlay_wielded_*</c>). Gendered overlays (<c>overlay_male_worn_longshirt</c>) win over plain ones.
     /// Every layer comes from the tileset that drew the body, since each tileset's clothes are
     /// drawn to fit its own body; clothes it has no art for aren't drawn.
     /// </summary>
-    private Texture2D? Portrait(PlayerActor player)
+    public static Texture2D? Portrait(TileArt? art, PlayerActor player)
     {
-        if (Art is null)
+        if (art is not { } Art)
             return null;
         string gender = player.Male ? "male" : "female";
         var canvas = Image.CreateEmpty(32, 32, false, Image.Format.Rgba8);
@@ -167,6 +181,8 @@ public partial class CharacterPanel : PanelContainer
         // Hair on top, so long styles fall over the shoulders of your shirt.
         if (player.Hair is { } hair)
             layers.Add(new[] { $"overlay_{gender}_mutation_{hair.Style}_var_{hair.Color}", $"overlay_mutation_{hair.Style}_var_{hair.Color}" });
+        if (player.Wielded is { } held)
+            layers.Add(new[] { $"overlay_{gender}_wielded_{held.Id}", $"overlay_wielded_{held.Id}" });
         foreach (var ids in layers)
         {
             if (Art.ChooseAny(0, baseChoice.Tileset, ids) is not { } choice || Art.Pixels(choice.Tileset, choice.Fg, 0) is not { } px)
@@ -193,6 +209,15 @@ public partial class CharacterPanel : PanelContainer
         name = name.Replace("left ", "L ").Replace("right ", "R ");
         return char.ToUpperInvariant(name[0]) + name[1..];
     }
+
+    /// <summary>White when fine, yellow, orange, red as a need gets worse.</summary>
+    public static Color NeedColor(NeedSeverity severity) => severity switch
+    {
+        NeedSeverity.Mild => new Color(0.95f, 0.85f, 0.3f),
+        NeedSeverity.Serious => new Color(0.95f, 0.55f, 0.2f),
+        NeedSeverity.Critical => new Color(0.95f, 0.3f, 0.25f),
+        _ => new Color(0.6f, 0.85f, 0.6f),
+    };
 
     /// <summary>Green when whole, through yellow and orange to red, dark red when broken.</summary>
     private static Color Health(int hp, int max)

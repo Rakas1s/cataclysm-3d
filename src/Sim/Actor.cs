@@ -42,8 +42,23 @@ public sealed class PlayerActor : Actor
     /// <summary>Your hair style and color, or null for bald.</summary>
     public Hair? Hair { get; init; }
 
+    /// <summary>What you wear, wield and carry.</summary>
+    public Inventory Inventory { get; } = new();
+
     /// <summary>What you have on, innermost layer first.</summary>
-    public IReadOnlyList<Clothing> Worn { get; init; } = Array.Empty<Clothing>();
+    public IReadOnlyList<Item> Worn => Inventory.Worn;
+
+    /// <summary>The item in your hands, or null when you fight bare-handed.</summary>
+    public Item? Wielded => Inventory.Wielded;
+
+    /// <summary>Hunger, thirst and fatigue.</summary>
+    public Needs Needs { get; } = new();
+
+    /// <summary>How much you can carry before it slows you down, in milligrams.</summary>
+    public long WeightCapacityMg => Inventory.WeightCapacityMg(Str);
+
+    /// <summary>Whether you're asleep. Sleeping is an activity <see cref="GameWorld.Sleep"/> runs.</summary>
+    public bool Asleep { get; set; }
 
     /// <summary>Luminance of the light the player carries (a flashlight that's on), or 0.</summary>
     public float CarriedLight { get; set; }

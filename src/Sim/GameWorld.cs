@@ -1,4 +1,5 @@
 using Cataclysm3D.Sim.Creatures;
+using Cataclysm3D.Sim.Items;
 using Cataclysm3D.Sim.Vision;
 using Cataclysm3D.Sim.World;
 
@@ -19,7 +20,7 @@ public sealed record Corpse(TilePos Pos, MonsterType Type, int Serial);
 /// One run: the map, the clock, the player, the monsters and what the player sees. The game
 /// submits the player's actions here; everything else happens on the <see cref="TurnScheduler"/>.
 /// </summary>
-public sealed class GameWorld
+public sealed partial class GameWorld
 {
     /// <summary>How many lines <see cref="Messages"/> keeps.</summary>
     public const int MaxMessages = 100;
@@ -53,6 +54,8 @@ public sealed class GameWorld
         Scheduler = new TurnScheduler(player, startTime);
         Sight = new FieldOfView(map);
         Scheduler.TurnStarted += () => UpdateSight();
+        Scheduler.TurnStarted += UpdateNeeds;
+        player.Needs.Update(Scheduler.Turn, player.Asleep);
         UpdateSight();
     }
 
@@ -102,21 +105,25 @@ public sealed class GameWorld
     // ---- the player's actions -------------------------------------------------------------
 
     /// <summary>
-    /// Attacks a monster next to you (CDDA: moving into a monster attacks it). Costs
-    /// <see cref="Melee.UnarmedAttackCost"/> moves, then the world runs.
+    /// Attacks a monster next to you (CDDA: moving into a monster attacks it) with what you
+    /// wield, or bare-handed. Costs <see cref="Melee.AttackCost"/> moves (more on a miss with a
+    /// heavy weapon), then the world runs.
     /// </summary>
     public void PlayerAttack(Monster target)
     {
         var p = Player;
         string name = Called(target);
+        string with = p.Wielded is { } weapon ? $" with your {weapon.Type.Name}" : "";
+        int cost = Melee.AttackCost(p);
         target.Notice(p.Pos);
         if (Melee.HitRoll(Rng, Melee.PlayerAccuracy(p)) <= target.Type.Dodge * 5)
         {
             Log($"You miss {name}.");
+            cost += Melee.StumbleCost(p);
         }
         else
         {
-            int damage = Melee.AfterArmor(new[] { (DamageType.Bash, Melee.PlayerUnarmedBash(p, Rng)) }, target.Type.Armor);
+            int damage = Melee.AfterArmor(Melee.PlayerDamage(p, Rng), target.Type.Armor);
             target.Hp -= damage;
             _events.Add(new MonsterHitEvent(target, damage));
             if (target.Hp <= 0)
@@ -126,10 +133,10 @@ public sealed class GameWorld
             }
             else
             {
-                Log(damage > 0 ? $"You hit {name} for {damage} damage." : $"You hit {name} but do no damage.");
+                Log(damage > 0 ? $"You hit {name}{with} for {damage} damage." : $"You hit {name}{with} but do no damage.");
             }
         }
-        Scheduler.SubmitPlayerAction(Melee.UnarmedAttackCost);
+        Spend(cost);
     }
 
     /// <summary>
@@ -181,10 +188,17 @@ public sealed class GameWorld
             return;
         }
         int part = p.Body.RandomPart(Rng);
-        int damage = Melee.AfterArmor(Melee.MonsterDamage(m.Type, Rng), default);
+        // The blow lands on the main part or one of its minor parts (a hand, a foot), by hit size;
+        // whatever you wear there may stop some of it.
+        string slot = BodySlots.RandomSlot(p.Body.Parts[part].Id, Rng);
+        var (armor, through) = p.Inventory.ArmorAgainst(slot, Rng);
+        int damage = Melee.AfterClothing(Melee.MonsterDamage(m.Type, Rng), armor);
         int lost = p.Body.Damage(part, damage);
         string partName = p.Body.Parts[part].Name;
-        Log(lost > 0 ? $"{name} hits your {partName} for {lost} damage." : $"{name} hits your {partName}, but it's already broken.");
+        string soaked = through.Count > 0 && damage == 0 ? $" Your {through[0].Type.Name} protects you." : "";
+        Log(lost > 0 ? $"{name} hits your {partName} for {lost} damage."
+            : damage == 0 ? $"{name} hits your {partName}.{soaked}"
+            : $"{name} hits your {partName}, but it's already broken.");
         _events.Add(new PlayerHitEvent(m, partName, lost));
         if (p.Body.IsDead)
         {

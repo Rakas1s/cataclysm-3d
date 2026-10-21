@@ -4,6 +4,7 @@ using Cataclysm3D.Importer.Creatures;
 using Cataclysm3D.Importer.World;
 using Cataclysm3D.Sim;
 using Cataclysm3D.Sim.Creatures;
+using Cataclysm3D.Sim.Items;
 using Cataclysm3D.Sim.Vision;
 using Cataclysm3D.Sim.World;
 using Godot;
@@ -15,7 +16,9 @@ namespace Cataclysm3D.Game;
 /// floors, roofs), renders it as stacked voxel levels and lets you walk it in first person with
 /// 8-direction tile steps, stairs and free mouse-look, driven by the sim's turns. The sim's clock
 /// drives the sun and moon, and its field of view decides what you see (M3). Zombies wander the
-/// town, hunt you when they see you and fight you hand to hand (M4).
+/// town, hunt you when they see you and fight you hand to hand (M4). Houses hold CDDA loot you
+/// can pick up, wear, wield and eat, from a drag-and-drop inventory, and hunger, thirst and
+/// sleepiness tick with the clock (M5).
 /// </summary>
 public partial class Main : Node3D
 {
@@ -36,6 +39,8 @@ public partial class Main : Node3D
     private Content _content = null!;
     private GameWorld _game = null!;
     private readonly CreatureViews _creatures = new() { Name = "Creatures" };
+    private readonly ItemViews _items = new() { Name = "Items" };
+    private readonly InventoryScreen _inventory = new();
     private readonly DayNight _dayNight = new();
     private readonly Node3D _lamps = new() { Name = "Lamps" };
     private int _lampsVersion = -1;
@@ -60,6 +65,12 @@ public partial class Main : Node3D
     private bool _noZombies;
     private bool _female;
     private readonly List<(int Dx, int Dy, string Id)> _extraZombies = new();
+    private readonly List<string> _give = new();
+    private readonly List<string> _wear = new();
+    private string? _wield;
+    private bool _shotInventory;
+    private int _shotSleepiness = -1;
+    private string? _shotSelect;
     private int _shotWaitTurns;
     private bool _shotFight;
     private bool _stepping;
@@ -80,7 +91,17 @@ public partial class Main : Node3D
         AddChild(_view);
         _creatures.Art = _content.Art;
         _character.Art = _content.Art;
+        _items.Art = _content.Art;
+        _inventory.Art = _content.Art;
+        ItemIcons.Art = _content.Art;
         AddChild(_creatures);
+        AddChild(_items);
+        _inventory.Changed += () =>
+        {
+            HandleEvents();
+            UpdateVision();
+            UpdateHud();
+        };
 
         _body = new Node3D();
         AddChild(_body);
@@ -141,6 +162,7 @@ public partial class Main : Node3D
         canvas.AddChild(Crosshair());
         canvas.AddChild(_tooltip);
         canvas.AddChild(_character);
+        canvas.AddChild(_inventory);
         AddChild(canvas);
 
         LoadTown();
@@ -156,6 +178,10 @@ public partial class Main : Node3D
     /// (default mon_zombie) that many tiles east and south of where you start (or of the first
     /// shot). <c>--wait=N</c> waits N turns before each shot, so monsters can close in, and
     /// <c>--fight</c> then punches whatever is next to you until it or you die.
+    /// Items: <c>--give=id,id</c> puts CDDA items on the ground where you stand (at the first
+    /// shot), <c>--wear=id,id</c> and <c>--wield=id</c> put them on you, and <c>--inventory</c>
+    /// opens the inventory screen for the shots (<c>--select=id</c> opens it with that item selected). <c>--sleep=N</c> sets your sleepiness to N and
+    /// sleeps where the shot stands before it's taken.
     /// </summary>
     private void ParseOptions()
     {
@@ -181,6 +207,31 @@ public partial class Main : Node3D
             else if (arg == "--fight")
             {
                 _shotFight = true;
+            }
+            else if (arg == "--inventory")
+            {
+                _shotInventory = true;
+            }
+            else if (arg.StartsWith("--select=", StringComparison.Ordinal))
+            {
+                _shotInventory = true;
+                _shotSelect = arg["--select=".Length..];
+            }
+            else if (arg.StartsWith("--sleep=", StringComparison.Ordinal))
+            {
+                _shotSleepiness = int.Parse(arg["--sleep=".Length..]);
+            }
+            else if (arg.StartsWith("--give=", StringComparison.Ordinal))
+            {
+                _give.AddRange(arg["--give=".Length..].Split(','));
+            }
+            else if (arg.StartsWith("--wear=", StringComparison.Ordinal))
+            {
+                _wear.AddRange(arg["--wear=".Length..].Split(','));
+            }
+            else if (arg.StartsWith("--wield=", StringComparison.Ordinal))
+            {
+                _wield = arg["--wield=".Length..];
             }
             else if (arg.StartsWith("--wait=", StringComparison.Ordinal))
             {
@@ -242,6 +293,30 @@ public partial class Main : Node3D
         if (_shots.Count > 0)
             Input.MouseMode = Input.MouseModeEnum.Visible;
         SpawnExtraZombies(_shots.Count > 0 ? _shots.Peek().Pos : Pos);
+        GiveItems(_shots.Count > 0 ? _shots.Peek().Pos : Pos);
+    }
+
+    /// <summary>The items asked for with <c>--give</c>, <c>--wear</c> and <c>--wield</c>.</summary>
+    private void GiveItems(TilePos at)
+    {
+        foreach (var id in _give)
+            if (_content.Items.Create(id) is { } item)
+                _world.Items.Add(at, item);
+            else
+                GD.PushWarning($"No item {id}");
+        var inv = _game.Player.Inventory;
+        foreach (var id in _wear)
+            if (_content.Items.Create(id) is { } item && inv.WhyCantWear(item) is null)
+                inv.Wear(item);
+            else
+                GD.PushWarning($"Can't wear {id}");
+        if (_wield is not null && _content.Items.Create(_wield) is { } weapon)
+        {
+            if (inv.Unwield() is { } old)
+                _world.Items.Add(at, old);
+            inv.Wield(weapon);
+        }
+        _game.UpdateSpeed();
     }
 
     /// <summary>The monsters asked for with <c>--zombie=dx,dy[,id]</c>, placed around <paramref name="origin"/>.</summary>
@@ -261,6 +336,11 @@ public partial class Main : Node3D
 
     private TilePos? FindFurniture(string id)
     {
+        // @loot: the first pile you can see, not shut away in a fridge or dresser.
+        if (id == "loot")
+            foreach (var (pos, items) in _world.Items.All.OrderBy(t => t.Pos.Z != 0).ThenBy(t => t.Pos.Y).ThenBy(t => t.Pos.X))
+                if (items.Count > 1 && _world.Level(pos.Z).FurnitureAt(pos.X, pos.Y) is var f && f?.Has("CONTAINER") != true)
+                    return pos;
         for (int z = _world.MinZ; z <= _world.MaxZ; z++)
         {
             var level = _world.Level(z);
@@ -299,9 +379,24 @@ public partial class Main : Node3D
             UpdateCutaway();
             UpdateVision();
             UpdateHud();
+            if (_shotSleepiness >= 0 && !_game.Player.IsDead)
+            {
+                _game.Player.Needs.Sleepiness = _shotSleepiness;
+                var clock = System.Diagnostics.Stopwatch.StartNew();
+                var outcome = _game.Sleep();
+                GD.Print($"Sleep: {outcome} after {_game.Scheduler.Turn} turns in {clock.ElapsedMilliseconds} ms");
+                HandleEvents();
+                UpdateVision();
+                UpdateHud();
+            }
+            if (_shotInventory)
+                _inventory.Open(_game);
+            if (_shotSelect is not null)
+                _inventory.Select(_shotSelect);
         }
         // Give shadows, SSAO, the HUD and gliding monsters a few frames to settle.
         _creatures.Sync(_game, _body.Position, 1f / 30);
+        _items.Sync(_game);
         if (++_shotFrames < 20)
             return true;
         GetViewport().GetTexture().GetImage().SavePng(shot.Path);
@@ -357,15 +452,20 @@ public partial class Main : Node3D
         _world = _town.Map;
         _warnings = _town.Warnings;
         _view.Display(_world);
+        _items.Display(_world);
+        _inventory.Close();
         // A new town keeps the clock running, unless you died.
         var now = _game is { Player.IsDead: false } ? _game.Scheduler.Now : _startTime;
         var player = new PlayerActor(bodyParts: _content.BodyParts)
         {
             Male = !_female,
             Hair = _content.RandomHair(new Random(_seed)),
-            Worn = _content.StartingOutfit(!_female),
         };
+        var leftovers = Outfit.Dress(player.Inventory, _content.StartingKit(!_female, new Random(_seed)));
         _game = new GameWorld(_world, player, StartFor(_town.Lots[_lotIndex]), now, _seed);
+        foreach (var item in leftovers)
+            _world.Items.Add(player.Pos, item);
+        _game.UpdateSpeed();
         if (!_noZombies)
             TownPopulation.Populate(_game, _town, _content.Monsters, _seed);
         _creatures.Clear();
@@ -373,7 +473,7 @@ public partial class Main : Node3D
         _hurtFlash.Color = _hurtFlash.Color with { A = 0 };
         _lampsVersion = -1;
         _message = $"Generated a town of {_town.Lots.Count} houses (seed {_seed}) in {clock.ElapsedMilliseconds} ms. " +
-                   $"CDDA data loaded in {_content.LoadMilliseconds} ms. {_game.Monsters.Count} monsters about. " +
+                   $"CDDA data loaded in {_content.LoadMilliseconds} ms. {_game.Monsters.Count} monsters about, {_world.Items.Count} items to loot. " +
                    (_content.Art is { } art
                        ? $"Tilesets {art.Summary} loaded in {art.LoadMilliseconds} ms; {art.Atlas.Count} surface sprites, {art.Models.Count} furniture models."
                        : "No tileset fetched: placeholder shapes.");
@@ -429,6 +529,12 @@ public partial class Main : Node3D
 
     public override void _UnhandledInput(InputEvent @event)
     {
+        if (_inventory.IsOpen)
+        {
+            if (@event is InputEventKey { Pressed: true, Echo: false } k && _inventory.HandleKey(k) && !_inventory.IsOpen)
+                CloseInventory();
+            return;
+        }
         if (@event is InputEventMouseButton { Pressed: true } && Input.MouseMode != Input.MouseModeEnum.Captured)
         {
             Input.MouseMode = Input.MouseModeEnum.Captured;
@@ -474,6 +580,25 @@ public partial class Main : Node3D
             case Key.L:
                 ToggleFlashlight();
                 break;
+            // CDDA's item keys. Plain w and d step (WASD), so wield and drop live in the inventory.
+            case Key.I:
+                OpenInventory();
+                break;
+            case Key.G:
+                PickUpHere();
+                break;
+            case Key.E:
+                OpenInventory(InventoryScreen.Verb.Eat);
+                break;
+            case Key.T:
+                OpenInventory(InventoryScreen.Verb.TakeOff);
+                break;
+            case Key.W when key.ShiftPressed:
+                OpenInventory(InventoryScreen.Verb.Wear);
+                break;
+            case Key.Key4 when key.ShiftPressed:
+                Sleep();
+                break;
             // CDDA's 5 (and .) waits a turn; | opens its wait menu. Period is taken by > here.
             case Key.Key5 or Key.Kp5:
                 Wait(1);
@@ -497,6 +622,8 @@ public partial class Main : Node3D
                     MoveVertically(1);
                 else if (key.Unicode == '>')
                     MoveVertically(-1);
+                else if (key.Unicode == '$')
+                    Sleep();
                 break;
         }
     }
@@ -508,7 +635,9 @@ public partial class Main : Node3D
         UpdateVision();
         HandleEvents();
         _creatures.Sync(_game, _body.Position, (float)delta);
-        if (_stepping || !_game.Scheduler.PlayerCanAct)
+        _items.Sync(_game);
+        // Shift is held for CDDA's capital-letter keys (W wear), so it doesn't step.
+        if (_stepping || !_game.Scheduler.PlayerCanAct || _inventory.IsOpen || Input.IsKeyPressed(Key.Shift))
             return;
 
         float forward = Axis(Key.W, Key.S);
@@ -653,6 +782,8 @@ public partial class Main : Node3D
                 case PlayerDiedEvent:
                     _hurtFlash.Color = _hurtFlash.Color with { A = 0.5f };
                     _deathNotice.Visible = true;
+                    if (_inventory.IsOpen)
+                        CloseInventory();
                     break;
             }
         }
@@ -738,10 +869,10 @@ public partial class Main : Node3D
     }
 
     /// <summary>
-    /// Unarmed smash strength. CDDA uses Str plus weapon bash damage; an unarmed Str 8 survivor
-    /// lands around here until characters and weapons exist.
+    /// How hard you smash: CDDA's bash strength is Str plus your weapon's bash. Bare-handed it's
+    /// at least 10, as since M1, so an 8-Str survivor can still break a window.
     /// </summary>
-    private const int UnarmedBashStrength = 10;
+    private int BashStrength => Math.Max(10, _game.Player.Str + (_game.Player.Wielded?.Type.Bash ?? 0));
 
     private readonly Random _rng = new();
 
@@ -758,7 +889,7 @@ public partial class Main : Node3D
             return;
         }
         var target = Facing();
-        var (outcome, sound, name) = Level.TryBash(target.X, target.Y, UnarmedBashStrength, _rng);
+        var (outcome, sound, name) = Level.TryBash(target.X, target.Y, BashStrength, _rng);
         switch (outcome)
         {
             case TileGrid.BashOutcome.NothingToSmash:
@@ -777,6 +908,57 @@ public partial class Main : Node3D
     }
 
     private static string Capitalize(string s) => s.Length == 0 ? s : char.ToUpperInvariant(s[0]) + s[1..];
+
+    /// <summary>Opens the inventory over the 3D view. Mouse-look pauses: the cursor is for dragging now.</summary>
+    private void OpenInventory(InventoryScreen.Verb? armed = null)
+    {
+        if (_stepping || !_game.Scheduler.PlayerCanAct)
+            return;
+        _inventory.Open(_game, armed);
+        Input.MouseMode = Input.MouseModeEnum.Visible;
+        _tooltip.Visible = false;
+    }
+
+    private void CloseInventory()
+    {
+        _inventory.Close();
+        _tooltipState = "";
+        if (_shots.Count == 0)
+            Input.MouseMode = Input.MouseModeEnum.Captured;
+        UpdateHud();
+    }
+
+    /// <summary>CDDA's <c>g</c>: picks up what's on your tile; with nothing here, looks at what's around you.</summary>
+    private void PickUpHere()
+    {
+        if (_stepping || !_game.Scheduler.PlayerCanAct)
+            return;
+        if (_world.Items.At(Pos).Count == 0)
+        {
+            if (_game.ItemsInReach().Count > 0)
+                OpenInventory();
+            else
+                _message = "There's nothing here to pick up.";
+            UpdateHud();
+            return;
+        }
+        _message = "";
+        _game.PickUpAllHere();
+        HandleEvents();
+        UpdateHud();
+    }
+
+    /// <summary>CDDA's <c>$</c>: lies down to sleep where you are, and time passes.</summary>
+    private void Sleep()
+    {
+        if (_stepping || !_game.Scheduler.PlayerCanAct)
+            return;
+        _message = "";
+        _game.Sleep();
+        HandleEvents();
+        UpdateVision();
+        UpdateHud();
+    }
 
     /// <summary>Blocks movement briefly so a held key doesn't spam bump messages.</summary>
     private void Pause(float seconds)
@@ -841,7 +1023,8 @@ public partial class Main : Node3D
             $"Ahead: {ahead}\n" +
             (_warnings.Count > 0 ? $"Mapgen gaps: {_warnings.Count}\n" : "") +
             $"{_message}\n\n" +
-            "WASD step · walk into a monster to punch it · mouse look · walk into doors to open · C close · F smash · < > stairs, climb · L flashlight · 5 wait · \\ wait 30 min · | wait till dawn/dusk · N/B next/prev house · R reroll town · Esc mouse";
+            "WASD step · walk into a monster to attack · mouse look · walk into doors to open · C close · F smash · < > stairs, climb · L flashlight · " +
+            "i inventory · g pick up · E eat · W wear · T take off · $ sleep · 5 wait · \\ wait 30 min · | wait till dawn/dusk · N/B next/prev house · R reroll town · Esc mouse";
         UpdateTooltip(facing);
         _character.Refresh(_game.Player, _flashlight);
         _log.Text = string.Join("\n", _game.Messages.Skip(Math.Max(0, _game.Messages.Count - LogLines)).Select(m => m.Text));
@@ -859,19 +1042,34 @@ public partial class Main : Node3D
             if (monsterState == _tooltipState)
                 return;
             _tooltipState = monsterState;
-            _tooltip.Show(Capitalize(monster.Type.Name) + health, new List<(string, string)> { ("W", $"Punch it ({odds:P0} to hit)") });
+            string attack = _game.Player.Wielded is { } weapon ? $"Hit it with your {weapon.Type.Name}" : "Punch it";
+            _tooltip.Show(Capitalize(monster.Type.Name) + health, new List<(string, string)> { ("W", $"{attack} ({odds:P0} to hit)") });
             return;
         }
         var actions = map.InBounds(facing.X, facing.Y)
-            ? Interactions.For(_world, Pos, (facing.X, facing.Y), UnarmedBashStrength)
+            ? Interactions.For(_world, Pos, (facing.X, facing.Y), BashStrength)
             : Array.Empty<Interaction>();
         string title = actions.Count == 0 ? "" : map.FurnitureAt(facing.X, facing.Y)?.Name ?? map.TerrainAt(facing.X, facing.Y).Name;
+        var rows = actions.Select(a => (KeyFor(a.Kind), a.Text)).ToList();
+        // Loot underfoot or in front of you: pick it up or open the inventory.
+        var here = _world.Items.At(Pos);
+        var ahead = map.InBounds(facing.X, facing.Y) ? _world.Items.At(new TilePos(facing.X, facing.Y, Pos.Z)) : Array.Empty<Item>();
+        if (here.Count > 0 && rows.Count < 3)
+        {
+            title = title.Length > 0 ? title : "On the ground";
+            rows.Add(("g", here.Count == 1 ? $"Pick up the {here[0].DisplayName}" : $"Pick up {here.Count} things here"));
+        }
+        if ((here.Count > 0 || ahead.Count > 0) && rows.Count < 3)
+        {
+            title = title.Length > 0 ? title : ahead.Count == 1 ? Capitalize(ahead[0].DisplayName) : $"{ahead.Count} things";
+            rows.Add(("i", ahead.Count > 0 && here.Count == 0 ? $"Look through the {ahead.Count} things there" : "Open your inventory"));
+        }
         // Mouse-look calls this every frame; only rebuild the panel when its content changes.
-        string state = title + string.Concat(actions.Select(a => "|" + a.Text));
+        string state = title + string.Concat(rows.Select(a => "|" + a.Item2)) + _world.Items.Version;
         if (state == _tooltipState)
             return;
         _tooltipState = state;
-        _tooltip.Show(Capitalize(title), actions.Select(a => (KeyFor(a.Kind), a.Text)).ToList());
+        _tooltip.Show(Capitalize(title), rows);
     }
 
     private static string KeyFor(InteractionKind kind) => kind switch

@@ -275,11 +275,12 @@ public class MonsterTests
     {
         var rng = new Random(9);
         var player = new PlayerActor();
-        var punches = Enumerable.Range(0, 500).Select(_ => Melee.PlayerUnarmedBash(player, rng)).ToList();
-        Assert.Equal(3, punches.Min());
+        // CDDA's bare-handed bash for Str 8: U(4, 8), rolled down to 40-100 %, x 0.8.
+        var punches = Enumerable.Range(0, 2000).Select(_ => Melee.AfterArmor(Melee.PlayerDamage(player, rng), default(Armor))).ToList();
+        Assert.Equal(1, punches.Min());
         Assert.Equal(6, punches.Max());
 
-        var bites = Enumerable.Range(0, 500).Select(_ => Melee.AfterArmor(Melee.MonsterDamage(Zombie, rng), default)).ToList();
+        var bites = Enumerable.Range(0, 500).Select(_ => Melee.AfterArmor(Melee.MonsterDamage(Zombie, rng), default(Armor))).ToList();
         Assert.Equal(2, bites.Min());
         Assert.Equal(6, bites.Max());
 
@@ -332,7 +333,7 @@ public class MonsterTests
     // ---- starting outfit ---------------------------------------------------------------------
 
     [Fact]
-    public void YouStartInYourProfessionsClothesInnermostFirst()
+    public void YouStartInYourProfessionsClothesInnermostFirstWithTheRestInYourPockets()
     {
         var db = new ContentDatabase();
         db.LoadJsonText("""
@@ -340,17 +341,24 @@ public class MonsterTests
               { "type": "profession", "id": "unemployed", "items": {
                 "both": { "entries": [{ "item": "jeans" }, { "item": "longshirt" }, { "item": "mbag" }, { "item": "pockknife" }, { "group": "starter_wallet" }] },
                 "male": { "entries": [{ "item": "boxer_shorts" }] }, "female": { "entries": [{ "item": "bra" }] } } },
-              { "type": "ITEM", "id": "jeans", "name": { "str_sp": "jeans" }, "armor": [{}] },
-              { "type": "ITEM", "id": "longshirt", "name": { "str": "long-sleeved shirt" }, "flags": ["SKINTIGHT"], "armor": [{}] },
-              { "type": "ITEM", "id": "mbag", "name": { "str": "messenger bag" }, "flags": ["BELTED"], "armor": [{}] },
-              { "type": "ITEM", "id": "boxer_shorts", "name": { "str": "boxer shorts" }, "flags": ["SKINTIGHT"], "armor": [{}] },
-              { "type": "ITEM", "id": "pockknife", "name": { "str": "pocket knife" } }
+              { "type": "ITEM", "id": "jeans", "name": { "str_sp": "jeans" }, "armor": [{ "covers": ["leg_l", "leg_r"] }] },
+              { "type": "ITEM", "id": "longshirt", "name": { "str": "long-sleeved shirt" }, "flags": ["SKINTIGHT"], "armor": [{ "covers": ["torso"] }] },
+              { "type": "ITEM", "id": "mbag", "name": { "str": "messenger bag" }, "flags": ["BELTED"], "armor": [{ "covers": ["torso"] }],
+                "pocket_data": [{ "pocket_type": "CONTAINER", "max_contains_volume": "5 L", "max_contains_weight": "5 kg" }] },
+              { "type": "ITEM", "id": "boxer_shorts", "name": { "str": "boxer shorts" }, "flags": ["SKINTIGHT"], "armor": [{ "covers": ["leg_l", "leg_r"] }] },
+              { "type": "ITEM", "id": "pockknife", "name": { "str": "pocket knife" }, "volume": "100 ml", "weight": "100 g" },
+              { "type": "item_group", "id": "starter_wallet", "subtype": "collection", "items": ["pockknife"] }
             ]
             """, "outfit.json");
-        var male = Outfit.Starting(db, "unemployed", male: true);
-        Assert.Equal(new[] { "longshirt", "boxer_shorts", "jeans", "mbag" }, male.Select(c => c.Id));
-        Assert.Equal("jeans", male[2].Name);
-        Assert.DoesNotContain(Outfit.Starting(db, "unemployed", male: false), c => c.Id == "boxer_shorts");
+        var items = Cataclysm3D.Importer.Items.ItemLoader.Registry(db);
+        var kit = Outfit.Starting(db, items, "unemployed", male: true, new Random(1));
+        Assert.Equal(new[] { "jeans", "longshirt", "mbag", "pockknife", "pockknife", "boxer_shorts" }, kit.Select(c => c.Id));
+        var player = new PlayerActor();
+        Assert.Empty(Outfit.Dress(player.Inventory, kit));
+        Assert.Equal(new[] { "longshirt", "boxer_shorts", "jeans", "mbag" }, player.Worn.Select(c => c.Id));
+        Assert.Equal("jeans", player.Worn[2].Type.Name);
+        Assert.Equal(2, player.Inventory.CarriedItems.Count(i => i.Id == "pockknife"));
+        Assert.DoesNotContain(Outfit.Starting(db, items, "unemployed", male: false, new Random(1)), c => c.Id == "boxer_shorts");
     }
 
     [Fact]

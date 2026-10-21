@@ -14,11 +14,13 @@ public static class Outfit
     /// <summary>Hair colors a new survivor rolls from; CDDA also offers dyed ones (blue, green, pink, purple).</summary>
     public static readonly string[] NaturalHairColors = { "black", "blond", "brown", "red", "gray", "white" };
 
-    /// <summary>Loads the profession and armor item JSON from the snapshot's <c>data/json</c>.</summary>
+    /// <summary>
+    /// Loads the profession and hair style JSON from the snapshot's <c>data/json</c>. The items
+    /// come from <see cref="Items.ItemLoader.LoadContent"/>.
+    /// </summary>
     public static void LoadContent(ContentDatabase db, string jsonRoot)
     {
         db.LoadFile(Path.Combine(jsonRoot, "professions.json"));
-        db.LoadDirectory(Path.Combine(jsonRoot, "items", "armor"));
         db.LoadFile(Path.Combine(jsonRoot, "mutations", "appearance_hair_styles.json"));
     }
 
@@ -46,34 +48,43 @@ public static class Outfit
     }
 
     /// <summary>
-    /// The wearable items in a profession's starting kit (its "both" entries plus the male or
-    /// female ones), innermost layer first. Item groups and things you carry rather than wear
-    /// (knives, phones, water) are left out.
+    /// A profession's starting kit (its "both" entries plus the male or female ones, groups
+    /// rolled), as items, in the order the JSON lists them.
     /// </summary>
-    public static IReadOnlyList<Clothing> Starting(ContentDatabase db, string profession, bool male)
+    public static List<Item> Starting(ContentDatabase db, ItemRegistry items, string profession, bool male, Random rng)
     {
+        var kit = new List<Item>();
         if (!db.Contains("profession", profession))
-            return Array.Empty<Clothing>();
-        var items = db.Get("profession", profession)["items"];
-        var ids = new[] { "both", male ? "male" : "female" }
-            .SelectMany(key => (items?[key]?["entries"] as System.Text.Json.Nodes.JsonArray) ?? new())
-            .Select(e => Json.FirstString(e?["item"]))
-            .OfType<string>();
-        var worn = new List<Clothing>();
-        foreach (var id in ids)
+            return kit;
+        var lists = db.Get("profession", profession)["items"];
+        var entries = new[] { "both", male ? "male" : "female" }
+            .SelectMany(key => (lists?[key]?["entries"] as System.Text.Json.Nodes.JsonArray) ?? new())
+            .OfType<System.Text.Json.Nodes.JsonObject>();
+        foreach (var e in entries)
         {
-            if (!db.Contains(ContentDatabase.ItemFamily, id))
-                continue;
-            var item = db.Get(ContentDatabase.ItemFamily, id);
-            if (item["armor"] is null)
-                continue;
-            var flags = Json.Strings(item["flags"]);
-            var layer = flags.Contains("SKINTIGHT") ? WornLayer.Skintight
-                : flags.Contains("BELTED") ? WornLayer.Belted
-                : WornLayer.Normal;
-            worn.Add(new Clothing(id, Json.Name(item, id), layer));
+            if (Json.FirstString(e["item"]) is { } id && items.Create(id, rng: rng) is { } item)
+                kit.Add(item);
+            else if (Json.FirstString(e["group"]) is { } group)
+                kit.AddRange(items.Roll(group, rng));
         }
-        // A stable sort keeps the kit's order within a layer, as CDDA does when you put things on.
-        return worn.OrderBy(c => c.Layer).ToList();
+        return kit;
+    }
+
+    /// <summary>
+    /// Puts a kit on: everything wearable is worn (sorted into its layer, innermost first, keeping
+    /// the kit's order within a layer as CDDA does), then the rest goes into pockets. Returns
+    /// what didn't fit anywhere.
+    /// </summary>
+    public static List<Item> Dress(Inventory inventory, IEnumerable<Item> kit)
+    {
+        var rest = new List<Item>();
+        foreach (var item in kit)
+        {
+            if (item.Type.IsArmor && inventory.WhyCantWear(item) is null)
+                inventory.Wear(item);
+            else
+                rest.Add(item);
+        }
+        return rest.Where(item => inventory.Stow(item) is null).ToList();
     }
 }

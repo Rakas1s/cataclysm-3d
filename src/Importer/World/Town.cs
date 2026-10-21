@@ -131,6 +131,11 @@ public sealed class TownGenerator
                     var (rx, ry) = TileGrid.Rotate(spawn.X, spawn.Y, LotSize, LotSize, turns);
                     spawns.Add((spawn, new TilePos(x + rx, y + ry, z)));
                 }
+                foreach (var (item, ix, iy) in result.Items)
+                {
+                    var (rx, ry) = TileGrid.Rotate(ix, iy, LotSize, LotSize, turns);
+                    map.Items.Add(new TilePos(x + rx, y + ry, z), item);
+                }
                 warnings.AddRange(result.Warnings.Select(w => $"{omt}: {w}"));
             }
             lots.Add(new Lot(building, x, y, LotSize, LotSize, turns));

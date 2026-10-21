@@ -94,11 +94,45 @@ rules differ from CDDA.
 ![Zombies closing in on the street](docs/screenshots/m4-zombies.png)
 ![A zombie by moonlight](docs/screenshots/m4-night.png)
 
-### Controls (M4)
+### Items and survival (M5)
+
+The houses hold CDDA's own loot, rolled from its item groups the way its mapgen places them:
+clothes in dressers, food in fridges and cupboards, dishes, tools, books. Items come from CDDA's
+item JSON (about 2,000 to 2,500 in the town) and stand on the floor, tables and beds as small
+billboards of their tileset sprites; what's shut away in a fridge or dresser isn't drawn, but
+it's there when you stand next to it. You start with the Unemployed profession's whole kit: its
+clothes on, and a pocket knife, a bottle of water, a phone, a wallet and matches in your pockets.
+
+![The inventory](docs/screenshots/m5-inventory.png)
+
+Press `i` for the inventory, a modal over the 3D view (mouse-look pauses while it's open). On the
+left is your portrait with a slot per body part showing what you wear there, with its encumbrance
+and warmth, and your hands; in the middle, your pockets, by the garment or bag they're in, with
+how much weight and space you have left; on the right, what lies on your tile and the eight
+around it. **Drag** an item from one place to another: onto your body to wear it, into your hands
+to wield it, into your pockets to pick it up or take it off, onto a tile to drop it. While you
+drag, the places that would take it turn green and the rest red; hovering a red one says why
+("Can't wear more than one rigid item on your left foot!", "The t-shirt doesn't go on your
+feet", "There's no room for the pillow"). Shift-drag moves a whole stack. Hover an item for its
+details (weight, volume, coverage, encumbrance, warmth, protection, melee damage, calories), or
+click it to select it: it lights up, and a panel under your portrait shows its sprite large,
+all its details, and a button for each thing you can do with it (with the reason under any that
+are greyed out). CDDA's keys work on the item under the mouse, or on the selected one. Everything costs CDDA's moves, so the world goes on while you rummage.
+
+What you wear protects you (each piece stops a blow with its coverage chance, by its materials),
+what you wield is what you hit with (a baseball bat hits three to four times as hard as a fist), and your
+pockets and bags limit what you can carry: a naked survivor carries nothing, and a 90 cm bat
+won't go in a backpack, so you hold it. Hunger, thirst and sleepiness tick with the clock, as in
+CDDA 0.I, and show under your portrait: drink and eat (`E`) to keep them down, and sleep (`$`) in
+a bed or on the floor, which passes the hours until you're rested or something comes for you.
+
+![Fighting with a baseball bat](docs/screenshots/m5-bat.png)
+
+### Controls (M5)
 
 | Key | Action |
 |---|---|
-| WASD | Step to one of the 8 neighboring tiles, relative to where you look; walk into a monster to punch it |
+| WASD | Step to one of the 8 neighboring tiles, relative to where you look; walk into a monster to attack it |
 | Mouse | Look (free, costs no time) |
 | Walk into a door | Open it |
 | C | Close the door you're facing |
@@ -106,12 +140,18 @@ rules differ from CDDA.
 | Walk onto stairs | Take them up or down (ladders too) |
 | `<` / `>` (or `,` / `.`, PgUp / PgDn) | Go up / down the stairs or ladder you stand on, or climb a downspout or gutter drop next to you |
 | L | Turn your flashlight on or off |
+| i | Inventory: drag items to wear, wield, take off, pick up and drop them |
+| g | Pick up everything on your tile (with nothing here, opens the inventory to reach the tiles around you) |
+| E | Eat or drink: opens the inventory asking what |
+| W (Shift+w) / T | Wear / take off: opens the inventory asking what |
+| $ | Sleep (in a bed, on a sofa, or on the floor); time passes until you're rested or woken |
+| In the inventory | Click an item to select it and see its details and actions. On the item under the mouse (or the selected one): `w` wield, `W` wear, `T` take off, `d` drop, `g` pick up, `E` eat. `i` or Esc closes it |
 | 5 (or numpad 5) | Wait a turn (one second) |
 | `\` / `\|` | Wait 30 minutes / wait until the next sunrise or sunset (a zombie showing up stops it) |
 | Enter | After you die: start a new run |
 | N / B | Jump to the front of the next / previous house |
 | R | Re-roll the whole town with a new seed (wall paint, flooring, variants) |
-| Esc | Release / capture the mouse |
+| Esc | Release / capture the mouse (or close the inventory) |
 
 Face something you can use (a door, window, chair, stairs, a downspout) and a tooltip by the
 crosshair lists the top three things you can do to it, with their keys: open, close, walk
@@ -136,6 +176,11 @@ Shots in one run share what you've seen, so later shots show remembered tiles.
 shot so they can close in, and `--fight` then punches whatever is next to you until one of you
 dies, e.g. `godot --path game -- --no-zombies --zombie=0,-4 --wait=6 --fight --shot=fight.png,12,-1,0,-20`.
 
+Items: `--give=id,id` puts CDDA items on the ground where the first shot stands, `--wear=id,id`
+and `--wield=id` put them on you, and `--inventory` opens the inventory for every shot (`--select=id` opens it with that item selected), e.g.
+`godot --path game -- --no-zombies --wield=bat --wear=jacket_light --give=apple,boots --inventory --shot=inv.png,12,-1,0,-20`.
+`@loot` as a shot's target stands you next to the first pile of loot you can see.
+
 House-local coordinates are the mapgen rows as drawn in the JSON, even for houses turned to face
 the road; yaw is in the world (0 = north). Lots 0–2 are south of the road, 3–5 north of it.
 
@@ -145,4 +190,5 @@ godot --headless --path game -- --art-report            # which sprite each id i
 ```
 
 Mapgen debugging: `dotnet run --project tools/ImportCheck -c Release -- --print bungalow01_1 3`
-prints a generated house as ASCII, and `-- --town 1` prints every z-level of the game's town.
+prints a generated house as ASCII, `-- --town 1` prints every z-level of the game's town, and
+`-- --loot 1` counts the loot each house spawns.

@@ -62,6 +62,34 @@ if (args.Length >= 1 && args[0] == "--town")
     return 0;
 }
 
+// Usage: dotnet run --project tools/ImportCheck --loot [seed] — what the game's town spawns as loot.
+if (args.Length >= 1 && args[0] == "--loot")
+{
+    var ldb = new ContentDatabase();
+    var lclock = Stopwatch.StartNew();
+    TownContent.Load(ldb, "cdda-snapshot/data/json");
+    Cataclysm3D.Importer.Items.ItemLoader.LoadContent(ldb, "cdda-snapshot/data/json");
+    Console.WriteLine($"Loaded in {lclock.ElapsedMilliseconds} ms");
+    var lreg = TileTypeLoader.Load(ldb);
+    var items = Cataclysm3D.Importer.Items.ItemLoader.Registry(ldb);
+    var gen = new MapgenGenerator(ldb, lreg, new MapgenLibrary(ldb)) { Items = items };
+    var town = new TownGenerator(gen, lreg, CityBuilding.LoadAll(ldb))
+        .Generate(TownContent.SouthRow, TownContent.NorthRow, args.Length > 1 ? int.Parse(args[1]) : 1);
+    Console.WriteLine($"Generated in {lclock.ElapsedMilliseconds} ms");
+    var all = town.Map.Items.All.ToList();
+    foreach (var lot in town.Lots)
+    {
+        var inLot = all.Where(t => t.Pos.X >= lot.X && t.Pos.X < lot.X + lot.Width && t.Pos.Y >= lot.Y && t.Pos.Y < lot.Y + lot.Height).ToList();
+        Console.WriteLine($"{lot.Building.Id}: {inLot.Sum(t => t.Items.Count)} items on {inLot.Count} tiles");
+    }
+    var byId = all.SelectMany(t => t.Items).GroupBy(i => i.DisplayName).OrderByDescending(g => g.Count());
+    Console.WriteLine(string.Join(", ", byId.Take(60).Select(g => $"{g.Key} x{g.Count()}")));
+    Console.WriteLine($"Missing ids: {string.Join(", ", items.Missing.Take(40))} ({items.Missing.Count})");
+    foreach (var w in town.Warnings.Where(w => w.Contains("item")).Distinct().Take(20))
+        Console.WriteLine($"warning: {w}");
+    return 0;
+}
+
 var dirs = args.Length > 0 ? args :new[] { "cdda-snapshot/data/core", "cdda-snapshot/data/json" };
 var db = new ContentDatabase();
 var clock = Stopwatch.StartNew();

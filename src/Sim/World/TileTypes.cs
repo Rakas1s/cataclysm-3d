@@ -28,6 +28,9 @@ public abstract class TileType
     /// <summary>CDDA's <c>light_emitted</c>: how bright a light this gives off, or 0.</summary>
     public int LightEmitted { get; init; }
 
+    /// <summary>CDDA's <c>comfort</c> for sleeping or resting on it (a bed is 5); 0 when it doesn't say.</summary>
+    public int Comfort { get; init; }
+
     public bool Has(string flag) => Flags.Contains(flag);
 
     private bool? _transparent;

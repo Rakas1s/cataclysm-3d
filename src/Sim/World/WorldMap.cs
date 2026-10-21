@@ -32,6 +32,9 @@ public sealed class WorldMap
     public int MinZ { get; }
     public int MaxZ { get; }
 
+    /// <summary>The items lying on the map, by tile.</summary>
+    public Items.MapItems Items { get; } = new();
+
     /// <summary>Raised when a tile on any level changes, with its (x, y, z).</summary>
     public event Action<int, int, int>? TileChanged;
 
