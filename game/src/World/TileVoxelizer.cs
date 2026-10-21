@@ -6,27 +6,103 @@ namespace Cataclysm3D.Game.World;
 /// <summary>
 /// Turns one tile's terrain + furniture into voxels. Shapes are chosen from CDDA flags
 /// (WALL, WINDOW, TREE, SHRUB, THIN_OBSTACLE, …) with id keywords for furniture. These are
-/// placeholder archetypes until the sprite→voxel pipeline (M3) produces per-id models.
+/// placeholder archetypes until the sprite→voxel pipeline (M3) produces per-id models. Each
+/// z-level has its own volume; its floor sits at voxel y 0 and its walls reach the next level.
 /// </summary>
 public static class TileVoxelizer
 {
     private const int N = VoxelVolume.PerTile;
 
-    /// <summary>Top of a storey's walls, exclusive (3 m). The ceiling slab sits on top.</summary>
-    public const int WallTop = 24;
+    /// <summary>Top of a storey's walls, exclusive (3 m). The next level's floor starts here.</summary>
+    public const int WallTop = VoxelVolume.StoreyHeight;
 
-    public static void Fill(VoxelVolume volume, TileGrid map, int tx, int ty)
+    public static void Fill(VoxelVolume volume, WorldMap world, int tx, int ty, int tz)
     {
         volume.ClearTile(tx, ty);
+        var map = world.Level(tz);
         var ter = map.TerrainAt(tx, ty);
         var b = new Brush(volume, tx, ty);
 
+        // Open air and the top of a stairwell are holes; solid earth only shows where it meets a room.
+        if (ter.Has("NO_FLOOR") || (ter.Has("NATURAL_UNDERGROUND") && IsBuried(map, tx, ty)))
+            return;
+        if (ter.Has("GOES_DOWN") && !ter.Has("GOES_UP"))
+            return;
+
         b.Box(0, N, 0, 1, 0, N, TilePalette.For(ter));
-        DrawTerrain(b, map, ter, tx, ty);
+        if (ter.Has("GOES_UP") && !ter.Has("LIQUID"))
+            DrawWayUp(b, map, ter, tx, ty);
+        else
+            DrawTerrain(b, map, ter, tx, ty);
         if (map.FurnitureAt(tx, ty) is { } fur)
             DrawFurniture(b, fur);
-        if (ter.Roof is not null)
-            b.Box(0, N, WallTop, WallTop + 1, 0, N, TilePalette.Ceiling);
+        if (HasCeiling(world, ter, tx, ty, tz))
+            b.Box(0, N, WallTop - 1, WallTop, 0, N, TilePalette.Ceiling);
+    }
+
+    /// <summary>
+    /// A ceiling under anything solid on the level above, so rooms stay closed in when the upper
+    /// levels are hidden. Stairwells stay open.
+    /// </summary>
+    private static bool HasCeiling(WorldMap world, TerrainType ter, int tx, int ty, int tz)
+    {
+        if (!world.HasLevel(tz + 1) || ter.Has("GOES_UP"))
+            return false;
+        var above = world.Level(tz + 1).TerrainAt(tx, ty);
+        return !above.Has("NO_FLOOR") && !above.Has("GOES_DOWN");
+    }
+
+    private static bool IsBuried(TileGrid map, int tx, int ty)
+    {
+        foreach (var (dx, dy) in new[] { (1, 0), (-1, 0), (0, 1), (0, -1) })
+            if (map.InBounds(tx + dx, ty + dy) && !map.TerrainAt(tx + dx, ty + dy).Has("NATURAL_UNDERGROUND"))
+                return false;
+        return true;
+    }
+
+    /// <summary>
+    /// Stairs climb one storey across their tile, rising away from the open side you walk onto
+    /// them from. Ladders stand in the middle of the tile.
+    /// </summary>
+    private static void DrawWayUp(Brush b, TileGrid map, TerrainType t, int tx, int ty)
+    {
+        if (t.Has("DIFFICULT_Z") || t.Id.Contains("ladder", StringComparison.Ordinal))
+        {
+            var metal = TilePalette.FromCddaName("dark_gray");
+            b.Box(1, 2, 1, WallTop, 3, 5, metal);
+            b.Box(N - 2, N - 1, 1, WallTop, 3, 5, metal);
+            for (int y = 3; y < WallTop; y += 3)
+                b.Box(2, N - 2, y, y + 1, 4, 5, metal);
+            return;
+        }
+
+        var (dx, dy) = RiseDirection(map, tx, ty);
+        var color = TilePalette.For(t);
+        const int StepRise = WallTop / N;
+        for (int i = 0; i < N; i++)
+        {
+            int top = Math.Min(1 + StepRise * (i + 1), WallTop);
+            var c = i % 2 == 0 ? color : color.Darkened(0.08f);
+            // Slice i of the flight, counted from the bottom step.
+            int a0 = dx + dy > 0 ? i : N - 1 - i;
+            if (dx != 0)
+                b.Box(a0, a0 + 1, 1, top, 0, N, c);
+            else
+                b.Box(0, N, 1, top, a0, a0 + 1, c);
+        }
+    }
+
+    /// <summary>Which way a flight of stairs rises: away from the first walkable, non-stair neighbor.</summary>
+    public static (int Dx, int Dy) RiseDirection(TileGrid map, int tx, int ty)
+    {
+        foreach (var (dx, dy) in new[] { (0, -1), (1, 0), (0, 1), (-1, 0) })
+        {
+            int nx = tx + dx, ny = ty + dy;
+            if (map.InBounds(nx, ny) && map.IsPassable(nx, ny)
+                && !map.TerrainAt(nx, ny).Has("GOES_UP") && !map.TerrainAt(nx, ny).Has("GOES_DOWN"))
+                return (-dx, -dy);
+        }
+        return (0, -1);
     }
 
     private static bool IsWallish(TerrainType t) =>

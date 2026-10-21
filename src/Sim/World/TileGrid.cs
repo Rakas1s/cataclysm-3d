@@ -1,6 +1,9 @@
 namespace Cataclysm3D.Sim.World;
 
-/// <summary>A single z-level grid of terrain + furniture. x grows east, y grows south (CDDA convention).</summary>
+/// <summary>
+/// One z-level of terrain + furniture. x grows east, y grows south (CDDA convention).
+/// <see cref="WorldMap"/> stacks these into a multi-level map.
+/// </summary>
 public sealed class TileGrid
 {
     private readonly int[] _terrain;
@@ -46,12 +49,18 @@ public sealed class TileGrid
         TileChanged?.Invoke(x, y);
     }
 
-    /// <summary>CDDA move cost of entering a tile; 0 means impassable.</summary>
+    /// <summary>
+    /// CDDA move cost of entering a tile; 0 means impassable. Open air (NO_FLOOR) counts as
+    /// impassable because falling isn't modeled yet.
+    /// </summary>
     public int MoveCost(int x, int y)
     {
         if (!InBounds(x, y))
             return 0;
-        int cost = TerrainAt(x, y).MoveCost;
+        var ter = TerrainAt(x, y);
+        if (ter.Has("NO_FLOOR"))
+            return 0;
+        int cost = ter.MoveCost;
         if (cost == 0)
             return 0;
         if (FurnitureAt(x, y) is { } f)
@@ -141,16 +150,34 @@ public sealed class TileGrid
         return false;
     }
 
-    /// <summary>Copies another map's tiles into this one with its top-left at (ox, oy).</summary>
-    public void Stamp(TileGrid source, int ox, int oy)
+    /// <summary>
+    /// Copies another map's tiles into this one with its top-left at (ox, oy), turned
+    /// <paramref name="quarterTurns"/> × 90° clockwise first. The turn happens inside a
+    /// <paramref name="frameWidth"/> × <paramref name="frameHeight"/> frame (default: the source's
+    /// size), so a map smaller than its lot turns with the lot.
+    /// </summary>
+    public void Stamp(TileGrid source, int ox, int oy, int quarterTurns = 0, int? frameWidth = null, int? frameHeight = null)
     {
+        int fw = frameWidth ?? source.Width, fh = frameHeight ?? source.Height;
         for (int y = 0; y < source.Height; y++)
         for (int x = 0; x < source.Width; x++)
         {
-            if (!InBounds(ox + x, oy + y))
+            var (rx, ry) = Rotate(x, y, fw, fh, quarterTurns);
+            if (!InBounds(ox + rx, oy + ry))
                 continue;
-            _terrain[(oy + y) * Width + ox + x] = Registry.TerrainIndex(source.TerrainAt(x, y).Id);
-            _furniture[(oy + y) * Width + ox + x] = Registry.FurnitureIndex(source.FurnitureAt(x, y)?.Id ?? TileRegistry.NullFurniture);
+            int i = (oy + ry) * Width + ox + rx;
+            _terrain[i] = Registry.TerrainIndex(source.TerrainAt(x, y).Id);
+            _furniture[i] = Registry.FurnitureIndex(source.FurnitureAt(x, y)?.Id ?? TileRegistry.NullFurniture);
         }
     }
+
+    /// <summary>Where (x, y) of a width × height map lands after turning it clockwise.</summary>
+    public static (int X, int Y) Rotate(int x, int y, int width, int height, int quarterTurns) =>
+        (((quarterTurns % 4) + 4) % 4) switch
+        {
+            1 => (height - 1 - y, x),
+            2 => (width - 1 - x, height - 1 - y),
+            3 => (y, width - 1 - x),
+            _ => (x, y),
+        };
 }

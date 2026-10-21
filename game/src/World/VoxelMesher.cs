@@ -58,9 +58,11 @@ public static class VoxelMesher
         }
     }
 
-    /// <summary>Meshes voxels in [min, max) and returns null when the box is empty.</summary>
+    /// <summary>Meshes voxels in [min, max), one chunk at most, and returns null when it's empty.</summary>
     public static ArrayMesh? Build(VoxelVolume volume, Vector3I min, Vector3I max, Material opaque, Material translucent)
     {
+        if (volume.IsChunkEmpty(min.X / (VoxelVolume.ChunkTiles * VoxelVolume.PerTile), min.Z / (VoxelVolume.ChunkTiles * VoxelVolume.PerTile)))
+            return null;
         var solid = new Surface();
         var glass = new Surface();
 

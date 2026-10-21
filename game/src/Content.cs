@@ -6,36 +6,26 @@ using Godot;
 
 namespace Cataclysm3D.Game;
 
-/// <summary>Loads the slice of the CDDA snapshot the game uses so far: tiles, palettes and house mapgen.</summary>
+/// <summary>Loads the slice of the CDDA snapshot the game uses so far: tiles, palettes, house mapgen and city buildings.</summary>
 public sealed class Content
 {
     public ContentDatabase Database { get; } = new();
     public TileRegistry Registry { get; }
     public MapgenGenerator Mapgen { get; }
-    public IReadOnlyList<string> Houses { get; }
+    public TownGenerator Towns { get; }
     public long LoadMilliseconds { get; }
 
     public Content()
     {
         var clock = Stopwatch.StartNew();
-        string root = FindSnapshot();
-        Database.LoadDirectory(Path.Combine(root, "furniture_and_terrain"));
-        Database.LoadDirectory(Path.Combine(root, "mapgen_palettes"));
-        Database.LoadDirectory(Path.Combine(root, "mapgen", "house"));
-        Database.LoadFile(Path.Combine(root, "regional_map_settings.json"));
-
+        TownContent.Load(Database, FindSnapshot());
         Registry = TileTypeLoader.Load(Database);
-        var library = new MapgenLibrary(Database);
-        Mapgen = new MapgenGenerator(Database, Registry, library);
-
-        // Ground floors only; roofs and basements are separate z-levels (M2).
-        Houses = library.OmTerrains
-            .Where(o => !o.Contains("roof") && !o.Contains("basement")
-                        && !System.Text.RegularExpressions.Regex.IsMatch(o, @"_[2-9]$"))
-            .Order(StringComparer.Ordinal)
-            .ToList();
+        Mapgen = new MapgenGenerator(Database, Registry, new MapgenLibrary(Database));
+        Towns = new TownGenerator(Mapgen, Registry, CityBuilding.LoadAll(Database));
         LoadMilliseconds = clock.ElapsedMilliseconds;
     }
+
+    public Town GenerateTown(int seed) => Towns.Generate(TownContent.SouthRow, TownContent.NorthRow, seed);
 
     private static string FindSnapshot()
     {

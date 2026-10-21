@@ -1,4 +1,5 @@
 using Cataclysm3D.Game.World;
+using Cataclysm3D.Importer.World;
 using Cataclysm3D.Sim;
 using Cataclysm3D.Sim.World;
 using Godot;
@@ -6,28 +7,32 @@ using Godot;
 namespace Cataclysm3D.Game;
 
 /// <summary>
-/// M1: generates a real CDDA house from its JSON mapgen, renders it as voxels and lets you walk it
-/// in first person with 8-direction tile steps and free mouse-look, driven by the sim's turns.
+/// M2: generates a small town of real CDDA houses with every z-level of each (basements, upper
+/// floors, roofs), renders it as stacked voxel levels and lets you walk it in first person with
+/// 8-direction tile steps, stairs and free mouse-look, driven by the sim's turns.
 /// </summary>
 public partial class Main : Node3D
 {
-    /// <summary>Grass margin around the 24×24 house so you start outside it.</summary>
-    private const int Margin = 8;
     private const float EyeHeight = 1.6f + VoxelVolume.VoxelSize;
     private const float StepSeconds = 0.12f;
+    private const float ClimbSeconds = 0.4f;
     private const float MouseSensitivity = 0.003f;
+
+    /// <summary>How far up a flight of stairs you stand on its bottom tile, so you aren't inside the steps.</summary>
+    private const float StairsLift = 0.6f;
 
     private Content _content = null!;
     private TurnScheduler _sim = null!;
-    private TileGrid _map = null!;
+    private Town _town = null!;
+    private WorldMap _world = null!;
     private WorldView _view = null!;
     private Node3D _body = null!;
     private Camera3D _camera = null!;
     private Label _hud = null!;
 
-    private int _houseIndex;
+    private int _lotIndex;
     private int _seed = 1;
-    private Vector2I _tile;
+    private TilePos _pos;
     private bool _stepping;
     private float _yaw;
     private float _pitch;
@@ -37,7 +42,6 @@ public partial class Main : Node3D
     public override void _Ready()
     {
         _content = new Content();
-        _houseIndex = Math.Max(0, _content.Houses.ToList().IndexOf("bungalow01_1"));
 
         SetUpEnvironment();
         _view = new WorldView();
@@ -59,15 +63,16 @@ public partial class Main : Node3D
         canvas.AddChild(Crosshair());
         AddChild(canvas);
 
-        LoadHouse();
+        LoadTown();
         Input.MouseMode = Input.MouseModeEnum.Captured;
         ParseShots();
     }
 
     // Screenshot mode for checking visuals without playing:
-    //   godot --path game -- --shot=out.png,tileX,tileY,yawDeg,pitchDeg [--shot=...]
-    // Tile coordinates are house-local (0..23); the game saves each shot, then quits.
-    private readonly Queue<(string Path, Vector2I Tile, float Yaw, float Pitch)> _shots = new();
+    //   godot --path game -- --shot=out.png,tileX,tileY,yawDeg,pitchDeg[,z[,lot]] [--shot=...]
+    // Tile coordinates are house-local (0..23, as the mapgen rows are drawn) on the given lot
+    // (default 0, the first house); yaw is in the world (0 = north). The game saves each shot, then quits.
+    private readonly Queue<(string Path, TilePos Pos, float Yaw, float Pitch)> _shots = new();
     private int _shotFrames;
 
     private void ParseShots()
@@ -77,7 +82,10 @@ public partial class Main : Node3D
             if (!arg.StartsWith("--shot=", StringComparison.Ordinal))
                 continue;
             var p = arg["--shot=".Length..].Split(',');
-            _shots.Enqueue((p[0], new Vector2I(int.Parse(p[1]) + Margin, int.Parse(p[2]) + Margin),
+            int z = p.Length > 5 ? int.Parse(p[5]) : 0;
+            var lot = _town.Lots[p.Length > 6 ? int.Parse(p[6]) : 0];
+            var (x, y) = lot.ToTown(int.Parse(p[1]), int.Parse(p[2]));
+            _shots.Enqueue((p[0], new TilePos(x, y, z),
                 Mathf.DegToRad(float.Parse(p[3], System.Globalization.CultureInfo.InvariantCulture)),
                 Mathf.DegToRad(float.Parse(p[4], System.Globalization.CultureInfo.InvariantCulture))));
         }
@@ -92,11 +100,12 @@ public partial class Main : Node3D
         var shot = _shots.Peek();
         if (_shotFrames == 0)
         {
-            _tile = shot.Tile;
-            _body.Position = TileToWorld(_tile);
+            _pos = shot.Pos;
+            _body.Position = TileToWorld(_pos);
             _yaw = shot.Yaw;
             _pitch = shot.Pitch;
             ApplyLook();
+            UpdateCutaway();
             UpdateHud();
         }
         // Give shadows, SSAO and the HUD a few frames to settle.
@@ -111,25 +120,35 @@ public partial class Main : Node3D
         return true;
     }
 
-    private void LoadHouse()
+    private void LoadTown()
     {
-        string house = _content.Houses[_houseIndex];
-        var result = _content.Mapgen.Generate(house, _seed);
-        _warnings = result.Warnings;
-
-        _map = new TileGrid(_content.Registry, result.Map.Width + Margin * 2, result.Map.Height + Margin * 2, "t_grass");
-        _map.Stamp(result.Map, Margin, Margin);
-        _view.Display(_map);
-
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        _town = _content.GenerateTown(_seed);
+        _world = _town.Map;
+        _warnings = _town.Warnings;
+        _view.Display(_world);
         _sim = new TurnScheduler(new PlayerActor());
-        _tile = new Vector2I(_map.Width / 2, _map.Height - Margin / 2);
-        _body.Position = TileToWorld(_tile);
-        _yaw = 0; // facing north, toward the house
+        _message = $"Generated a town of {_town.Lots.Count} houses (seed {_seed}) in {clock.ElapsedMilliseconds} ms. " +
+                   $"CDDA data loaded in {_content.LoadMilliseconds} ms.";
+        GoToLot(_lotIndex);
+    }
+
+    /// <summary>Puts you on the sidewalk in front of a lot, looking at the house.</summary>
+    private void GoToLot(int index)
+    {
+        _lotIndex = index;
+        var lot = _town.Lots[index];
+        bool facesNorth = lot.QuarterTurns == 0;
+        _pos = new TilePos(lot.X + lot.Width / 2, facesNorth ? lot.Y - 1 : lot.Y + lot.Height, 0);
+        _body.Position = TileToWorld(_pos);
+        _yaw = facesNorth ? Mathf.Pi : 0; // yaw 0 looks north
         _pitch = 0;
         ApplyLook();
-        _message = $"Loaded {house} (seed {_seed}). CDDA data loaded in {_content.LoadMilliseconds} ms.";
+        UpdateCutaway();
         UpdateHud();
     }
+
+    private TileGrid Level => _world.Level(_pos.Z);
 
     // Mouse-look is read in _Input, before any UI gets a chance to consume the motion.
     public override void _Input(InputEvent @event)
@@ -161,22 +180,36 @@ public partial class Main : Node3D
                     : Input.MouseModeEnum.Captured;
                 break;
             case Key.N:
-                _houseIndex = (_houseIndex + 1) % _content.Houses.Count;
-                LoadHouse();
+                _message = "";
+                GoToLot((_lotIndex + 1) % _town.Lots.Count);
                 break;
             case Key.B:
-                _houseIndex = (_houseIndex - 1 + _content.Houses.Count) % _content.Houses.Count;
-                LoadHouse();
+                _message = "";
+                GoToLot((_lotIndex - 1 + _town.Lots.Count) % _town.Lots.Count);
                 break;
             case Key.R:
                 _seed++;
-                LoadHouse();
+                LoadTown();
                 break;
             case Key.C:
                 CloseFacing();
                 break;
             case Key.F:
                 SmashFacing();
+                break;
+            // CDDA's < and >. The physical comma/period keys cover them shifted or not on US
+            // layouts; other layouts land in the Unicode check below.
+            case Key.Comma or Key.Pageup:
+                MoveVertically(1);
+                break;
+            case Key.Period or Key.Pagedown:
+                MoveVertically(-1);
+                break;
+            default:
+                if (key.Unicode == '<')
+                    MoveVertically(1);
+                else if (key.Unicode == '>')
+                    MoveVertically(-1);
                 break;
         }
     }
@@ -194,43 +227,95 @@ public partial class Main : Node3D
             return;
 
         var step = SnapToOctant(forward, right);
-        var target = _tile + step;
-        int cost = _map.MoveCost(target.X, target.Y);
+        var target = _pos with { X = _pos.X + step.X, Y = _pos.Y + step.Y };
+        var map = Level;
+        int cost = map.MoveCost(target.X, target.Y);
 
         if (cost > 0)
         {
-            _tile = target;
             _message = "";
             // CDDA: entering a tile costs move_cost * 50 moves (100 on normal ground).
             _sim.SubmitPlayerAction(cost * 50);
-            _stepping = true;
-            var tween = CreateTween();
-            tween.TweenProperty(_body, "position", TileToWorld(_tile), StepSeconds * cost / 2f)
-                .SetTrans(Tween.TransitionType.Sine);
-            tween.Finished += () => _stepping = false;
+            // Walking onto stairs (or a ladder) takes them, rather than waiting for < or >.
+            // Arriving on the other end doesn't, so you can step off it.
+            var ter = map.TerrainAt(target.X, target.Y);
+            int dz = ter.Has("LIQUID") ? 0 : ter.Has("GOES_UP") ? 1 : ter.Has("GOES_DOWN") ? -1 : 0;
+            MoveBodyTo(target, StepSeconds * cost / 2f, dz != 0 ? () => MoveVertically(dz) : null);
         }
-        else if (_map.InBounds(target.X, target.Y) && _map.TerrainAt(target.X, target.Y) is var door && _map.TryOpen(target.X, target.Y, fromInside: _map.IsIndoors(_tile.X, _tile.Y)))
+        else if (map.InBounds(target.X, target.Y) && map.TerrainAt(target.X, target.Y) is var door
+                 && map.TryOpen(target.X, target.Y, fromInside: map.IsIndoors(_pos.X, _pos.Y)))
         {
             _message = door.Has("LOCKED") ? $"You unlock and open the {door.Name}." : $"You open the {door.Name}.";
             _sim.SubmitPlayerAction(100);
             Pause(0.2f);
         }
-        else if (_map.InBounds(target.X, target.Y))
+        else if (map.InBounds(target.X, target.Y))
         {
-            var ter = _map.TerrainAt(target.X, target.Y);
-            var blocker = _map.FurnitureAt(target.X, target.Y) is { MoveCostMod: < 0 } f ? f.Name : ter.Name;
-            _message = ter.Has("LOCKED") || ter.Has("OPENCLOSE_INSIDE")
-                ? $"The {ter.Name} only opens from the inside. Smash it or a window (F), or find another door."
-                : $"There's a {blocker} in the way.";
+            var ter = map.TerrainAt(target.X, target.Y);
+            var blocker = map.FurnitureAt(target.X, target.Y) is { MoveCostMod: < 0 } f ? f.Name : ter.Name;
+            _message = ter.Has("NO_FLOOR")
+                ? "You'd fall. (Falling isn't in yet.)"
+                : ter.Has("LOCKED") || ter.Has("OPENCLOSE_INSIDE")
+                    ? $"The {ter.Name} only opens from the inside. Smash it or a window (F), or find another door."
+                    : $"There's a {blocker} in the way.";
             Pause(0.2f);
         }
         UpdateHud();
     }
 
+    /// <summary>Takes stairs or a ladder under you, or climbs a downspout next to you (CDDA's &lt; and &gt;).</summary>
+    private void MoveVertically(int dz)
+    {
+        if (_stepping || !_sim.PlayerCanAct)
+            return;
+        var facing = Facing();
+        if (!_world.TryPlanVerticalMove(_pos, dz, (facing.X, facing.Y), out var move, out var reason))
+        {
+            _message = reason;
+            UpdateHud();
+            return;
+        }
+        string dir = dz > 0 ? "up" : "down";
+        _message = move.Kind == VerticalMoveKind.Stairs ? $"You walk {dir} the {move.Via}." : $"You climb {dir} the {move.Via}.";
+        _sim.SubmitPlayerAction(move.Cost);
+        MoveBodyTo(move.Destination, ClimbSeconds);
+        UpdateHud();
+    }
+
+    private void MoveBodyTo(TilePos target, float seconds, Action? then = null)
+    {
+        _pos = target;
+        _stepping = true;
+        var tween = CreateTween();
+        tween.TweenProperty(_body, "position", TileToWorld(_pos), seconds).SetTrans(Tween.TransitionType.Sine);
+        tween.Finished += () =>
+        {
+            _stepping = false;
+            then?.Invoke();
+        };
+        UpdateCutaway();
+    }
+
+    /// <summary>
+    /// Hides the levels above while indoors, except near stairs up: the stairwell has no ceiling,
+    /// so you'd look up it into the sky.
+    /// </summary>
+    private void UpdateCutaway()
+    {
+        var map = Level;
+        bool nearStairs = false;
+        for (int dy = -2; dy <= 2 && !nearStairs; dy++)
+        for (int dx = -2; dx <= 2 && !nearStairs; dx++)
+            nearStairs = map.InBounds(_pos.X + dx, _pos.Y + dy) && map.TerrainAt(_pos.X + dx, _pos.Y + dy).Has("GOES_UP");
+        _view.SetCutaway(_pos, _world.IsCovered(_pos) && !nearStairs);
+    }
+
+    private Vector2I Facing() => new Vector2I(_pos.X, _pos.Y) + SnapToOctant(1, 0);
+
     private void CloseFacing()
     {
-        var target = _tile + SnapToOctant(1, 0);
-        if (_map.TryClose(target.X, target.Y))
+        var target = Facing();
+        if (Level.TryClose(target.X, target.Y))
         {
             _message = $"You close the door.";
             _sim.SubmitPlayerAction(100);
@@ -254,8 +339,8 @@ public partial class Main : Node3D
     {
         if (!_sim.PlayerCanAct)
             return;
-        var target = _tile + SnapToOctant(1, 0);
-        var (outcome, sound, name) = _map.TryBash(target.X, target.Y, UnarmedBashStrength, _rng);
+        var target = Facing();
+        var (outcome, sound, name) = Level.TryBash(target.X, target.Y, UnarmedBashStrength, _rng);
         switch (outcome)
         {
             case TileGrid.BashOutcome.NothingToSmash:
@@ -305,24 +390,34 @@ public partial class Main : Node3D
     private static float Axis(Key positive, Key negative) =>
         (Input.IsPhysicalKeyPressed(positive) ? 1 : 0) - (Input.IsPhysicalKeyPressed(negative) ? 1 : 0);
 
-    private static Vector3 TileToWorld(Vector2I tile) => new(tile.X + 0.5f, 0, tile.Y + 0.5f);
+    private Vector3 TileToWorld(TilePos p)
+    {
+        var ter = _world.TerrainAt(p);
+        bool onStairs = ter.Has("GOES_UP") && !ter.Has("DIFFICULT_Z") && !ter.Id.Contains("ladder", StringComparison.Ordinal);
+        return new Vector3(p.X + 0.5f, WorldView.LevelBase(p.Z) + (onStairs ? StairsLift : 0), p.Y + 0.5f);
+    }
 
     private void UpdateHud()
     {
-        var facing = _tile + SnapToOctant(1, 0);
+        var map = Level;
+        var facing = Facing();
         string ahead = "";
-        if (_map.InBounds(facing.X, facing.Y))
+        if (map.InBounds(facing.X, facing.Y))
         {
-            var t = _map.TerrainAt(facing.X, facing.Y);
-            ahead = _map.FurnitureAt(facing.X, facing.Y) is { } f ? $"{f.Name} on {t.Name}" : t.Name;
+            var t = map.TerrainAt(facing.X, facing.Y);
+            ahead = map.FurnitureAt(facing.X, facing.Y) is { } f ? $"{f.Name} on {t.Name}" : t.Name;
         }
-        string house = _content.Houses[_houseIndex];
+        var here = map.TerrainAt(_pos.X, _pos.Y);
+        string where = _town.Lots.FirstOrDefault(l => _pos.X >= l.X && _pos.X < l.X + l.Width && _pos.Y >= l.Y && _pos.Y < l.Y + l.Height)
+            is { } lot ? lot.Building.Id : "street";
+        string stairs = here.Has("GOES_UP") ? "  (< to go up)" : here.Has("GOES_DOWN") ? "  (> to go down)" : "";
         _hud.Text =
-            $"{house}  ·  seed {_seed}  ·  house {_houseIndex + 1}/{_content.Houses.Count}  ·  turn {_sim.Turn}\n" +
+            $"{where}  ·  z {_pos.Z:+0;-0;0}  ·  seed {_seed}  ·  turn {_sim.Turn}\n" +
+            $"Here: {here.Name}{stairs}\n" +
             $"Ahead: {ahead}\n" +
             (_warnings.Count > 0 ? $"Mapgen gaps: {_warnings.Count}\n" : "") +
             $"{_message}\n\n" +
-            "WASD step · mouse look · walk into doors to open · C close · F smash · N/B next/prev house · R reroll · Esc mouse";
+            "WASD step · mouse look · walk into doors to open · C close · F smash · < > stairs, climb · N/B next/prev house · R reroll town · Esc mouse";
     }
 
     private static Control Crosshair()
@@ -348,7 +443,7 @@ public partial class Main : Node3D
             ShadowEnabled = true,
             LightEnergy = 1.1f,
             LightColor = new Color(1f, 0.96f, 0.88f),
-            DirectionalShadowMaxDistance = 60,
+            DirectionalShadowMaxDistance = 80,
         });
         var sky = new ProceduralSkyMaterial
         {

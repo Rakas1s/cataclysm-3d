@@ -36,9 +36,15 @@ dotnet run --project tools/ImportCheck -c Release   # load + resolve all CDDA JS
 
 Then open `game/project.godot` in Godot .NET and press Play.
 
-![bungalow01 kitchen](docs/screenshots/m1-bungalow-kitchen.png)
+![The M2 town](docs/screenshots/m2-street.png)
 
-### Controls (M1)
+The game starts on the street of a small town of six CDDA houses (M2). Each house is generated
+on every z-level its CDDA `city_building` lists: basement on z-1, ground floor, upper floors and
+the `_roof` mapgen on top. Walk in, take the stairs, or climb a downspout onto the roof.
+
+![Stairs to the second floor](docs/screenshots/m2-stairs.png)
+
+### Controls (M2)
 
 | Key | Action |
 |---|---|
@@ -47,15 +53,24 @@ Then open `game/project.godot` in Godot .NET and press Play.
 | Walk into a door | Open it |
 | C | Close the door you're facing |
 | F | Smash what you're facing (windows break easily; locked doors take many kicks) |
-| N / B | Next / previous house (all 143 CDDA house ground floors) |
-| R | Re-roll the current house with a new seed (wall paint, flooring, variants) |
+| Walk onto stairs | Take them up or down (ladders too) |
+| `<` / `>` (or `,` / `.`, PgUp / PgDn) | Go up / down the stairs or ladder you stand on, or climb a downspout or gutter drop next to you |
+| N / B | Jump to the front of the next / previous house |
+| R | Re-roll the whole town with a new seed (wall paint, flooring, variants) |
 | Esc | Release / capture the mouse |
+
+While you're indoors, the levels above you are hidden nearby (each room keeps its ceiling), except
+when you're near stairs going up.
 
 Screenshot mode for checking visuals without playing:
 
 ```powershell
-godot --path game -- --shot=out.png,12,28,0,4   # file, house-local tile x, y, yaw°, pitch°
+godot --path game -- --shot=out.png,12,28,0,4          # file, house-local tile x, y, yaw°, pitch°
+godot --path game -- --shot=out.png,3,8,-90,-25,1,0    # ...then z-level and house (lot) index
 ```
 
+House-local coordinates are the mapgen rows as drawn in the JSON, even for houses turned to face
+the road; yaw is in the world (0 = north). Lots 0–2 are south of the road, 3–5 north of it.
+
 Mapgen debugging: `dotnet run --project tools/ImportCheck -c Release -- --print bungalow01_1 3`
-prints a generated house as ASCII.
+prints a generated house as ASCII, and `-- --town 1` prints every z-level of the game's town.

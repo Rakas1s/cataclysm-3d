@@ -33,7 +33,36 @@ if (args.Length >= 2 && args[0] == "--print")
     return 0;
 }
 
-var dirs = args.Length > 0 ? args : new[] { "cdda-snapshot/data/core", "cdda-snapshot/data/json" };
+// Usage: dotnet run --project tools/ImportCheck --town [seed] — prints every z-level of the M2 town.
+if (args.Length >= 1 && args[0] == "--town")
+{
+    // The same content slice the game loads, so this prints exactly the game's town.
+    var tdb = new ContentDatabase();
+    TownContent.Load(tdb, "cdda-snapshot/data/json");
+    var treg = TileTypeLoader.Load(tdb);
+    var towns = new TownGenerator(new MapgenGenerator(tdb, treg, new MapgenLibrary(tdb)), treg, CityBuilding.LoadAll(tdb));
+    var town = towns.Generate(TownContent.SouthRow, TownContent.NorthRow, args.Length > 1 ? int.Parse(args[1]) : 1);
+    for (int z = town.Map.MaxZ; z >= town.Map.MinZ; z--)
+    {
+        Console.WriteLine($"z {z}:");
+        var level = town.Map.Level(z);
+        for (int y = 0; y < level.Height; y++)
+        {
+            var line = new System.Text.StringBuilder();
+            for (int x = 0; x < level.Width; x++)
+                line.Append(level.FurnitureAt(x, y)?.Symbol ?? level.TerrainAt(x, y).Symbol);
+            Console.WriteLine(line);
+        }
+    }
+    foreach (var lot in town.Lots)
+        Console.WriteLine($"{lot.Building.Id} at {lot.X},{lot.Y} turned {lot.QuarterTurns * 90}°: " +
+                          string.Join(", ", lot.Building.Levels.OrderBy(l => l.Key).Select(l => $"z{l.Key} {l.Value}")));
+    foreach (var w in town.Warnings.Distinct().Take(30))
+        Console.WriteLine($"warning: {w}");
+    return 0;
+}
+
+var dirs = args.Length > 0 ? args :new[] { "cdda-snapshot/data/core", "cdda-snapshot/data/json" };
 var db = new ContentDatabase();
 var clock = Stopwatch.StartNew();
 
